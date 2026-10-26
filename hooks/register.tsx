@@ -18,7 +18,6 @@ import {
   overview,
   plural,
   STATUS_COLOR,
-  stats,
   statusColor,
   summarize,
   TILE_H,
@@ -386,7 +385,7 @@ export const register: Register = (on) => {
 
       return (
         <Box flexDirection="column" gap={1}>
-          {isEnabled ? statsHeader(graph, $.ui.resolve(e), copy) : headerRow}
+          {headerRow}
           <Svg
             source={await svgSource($, graph, isFoldOpen, !isEnabled)}
             width={Math.round(natural.width * scale)}
@@ -575,55 +574,6 @@ export const register: Register = (on) => {
     );
   });
 };
-
-const STATUS_LABEL: Record<OrchestraStatus, string> = {
-  run: "running",
-  wait: "need you",
-  hold: "held",
-  idle: "idle",
-  done: "done",
-  fail: "failed",
-};
-
-/** The desktop pane's header: status counts and Copy on one row, then a tile per figure. */
-function statsHeader(
-  graph: OrchestraGraph,
-  { Box, Button, Text }: ReturnType<EngineInterface["ui"]["resolve"]>,
-  copy: () => Promise<void>,
-) {
-  const { counts, tiles, top } = stats(graph);
-
-  return (
-    <Box flexDirection="column" gap={1}>
-      <Box flexDirection="row" justifyContent="space-between">
-        <Box flexDirection="row" gap={2}>
-          {counts.map(([status, count]) => (
-            <Text key={status}>
-              <Text color={STATUS_COLOR[status]}>● </Text>
-              <Text bold>{count}</Text> {STATUS_LABEL[status]}
-            </Text>
-          ))}
-        </Box>
-        <Button key="copy" label="Copy" onPress={() => void copy()} />
-      </Box>
-      <Box flexDirection="row" gap={1}>
-        {tiles.map(([label, value]) => (
-          <Box
-            key={label}
-            flexDirection="column"
-            borderStyle="round"
-            borderColor="subtle"
-            paddingX={1}
-          >
-            <Text dimColor>{label}</Text>
-            <Text bold>{value}</Text>
-          </Box>
-        ))}
-      </Box>
-      {top ? <Text dimColor>Top spender: {top}</Text> : null}
-    </Box>
-  );
-}
 
 function record(id: string, tool: string, input: Record<string, unknown>, now: number) {
   const h = live.history;

@@ -17,7 +17,6 @@ import {
   summarize,
   TILE_H,
   TILE_W,
-  stats,
   totals,
 } from "../hooks/graph";
 import type { OrchestraGraph, OrchestraHistory, OrchestraNode } from "../types";
@@ -210,19 +209,6 @@ test("summary and totals count the whole session", () => {
   expect(totals(graph)).toBe(
     "2 agents · 1 running · 1 failed · 8 calls · $1.50 · waited on you 1m02",
   );
-  expect(stats(graph)).toEqual({
-    counts: [
-      ["run", 1],
-      ["fail", 1],
-    ],
-    tiles: [
-      ["Agents", "2"],
-      ["Calls", "8"],
-      ["Cost", "$1.50"],
-      ["Waited on you", "1m02"],
-    ],
-    top: undefined,
-  });
 });
 
 test("on the terminal each agent is a tile whose title opens its conversation", async ($, on) => {
