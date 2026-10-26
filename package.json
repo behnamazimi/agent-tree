@@ -1,0 +1,14 @@
+{
+  "name": "orchestra",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "oxlint",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check"
+  },
+  "devDependencies": {
+    "oxfmt": "^0.74.0",
+    "oxlint": "^1.89.0"
+  }
+}

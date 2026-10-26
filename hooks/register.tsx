@@ -1,7 +1,7 @@
-import { atom, read, update } from 'claude-code'
-import type { AgentInfo, EngineInterface, Register, Timer } from 'claude-code'
+import { atom, read, update } from "claude-code";
+import type { AgentInfo, EngineInterface, Register, Timer } from "claude-code";
 
-import type { OrchestraGraph, OrchestraHistory, OrchestraNode, OrchestraStatus } from '../types'
+import type { OrchestraGraph, OrchestraHistory, OrchestraNode, OrchestraStatus } from "../types";
 import {
   age,
   attributeCost,
@@ -23,42 +23,48 @@ import {
   TILE_H,
   TILE_W,
   totals,
-} from './graph'
-import type { PlacedFold, PlacedTile } from './graph'
-import { renderGraphSvg, svgSize } from './svg'
-import type { WiresProps } from './wires'
+} from "./graph";
+import type { PlacedFold, PlacedTile } from "./graph";
+import { renderGraphSvg, svgSize } from "./svg";
+import type { WiresProps } from "./wires";
 
-const PANE = 'orchestra'
-const MAIN = 'main'
-const TICK_MS = 1000
-const START_SESSION_TOOL = 'mcp__ccd_session__start_session'
-const CARD_W = 46
+const PANE = "orchestra";
+const MAIN = "main";
+const TICK_MS = 1000;
+const START_SESSION_TOOL = "mcp__ccd_session__start_session";
+const CARD_W = 46;
 // Measured from a desktop pane: about 10.6px per cell; a little under keeps the drawing inside.
-const PX_PER_COLUMN = 10
-const FINE_REDRAW_MS = 10_000
+const PX_PER_COLUMN = 10;
+const FINE_REDRAW_MS = 10_000;
 // Each new SVG source reloads its frame, which shows as a blink; between events it is only refreshed this often.
-const SVG_REFRESH_MS = 300_000
-const CARD_ROOM = 9
-const SEEN_CAP = 50
+const SVG_REFRESH_MS = 300_000;
+const CARD_ROOM = 9;
+const SEEN_CAP = 50;
 
-const isOnAtom = atom({ plugin: 'orchestra', key: 'isOn' } as const, true)
-const graphAtom = atom({ plugin: 'orchestra', key: 'graph' } as const, {
-  nodes: [],
-  now: 0,
-} as OrchestraGraph)
-const historyAtom = atom({ plugin: 'orchestra', key: 'history' } as const, null as OrchestraHistory | null)
-const nowAtom = atom({ plugin: 'orchestra', key: 'now' } as const, 0)
-const foldAtom = atom({ plugin: 'orchestra', key: 'isFoldOpen' } as const, false)
+const isOnAtom = atom({ plugin: "orchestra", key: "isOn" } as const, true);
+const graphAtom = atom(
+  { plugin: "orchestra", key: "graph" } as const,
+  {
+    nodes: [],
+    now: 0,
+  } as OrchestraGraph,
+);
+const historyAtom = atom(
+  { plugin: "orchestra", key: "history" } as const,
+  null as OrchestraHistory | null,
+);
+const nowAtom = atom({ plugin: "orchestra", key: "now" } as const, 0);
+const foldAtom = atom({ plugin: "orchestra", key: "isFoldOpen" } as const, false);
 
-const AGENT_STATUS: Record<AgentInfo['status'], OrchestraStatus> = {
-  pending: 'run',
-  running: 'run',
-  waiting: 'hold',
-  idle: 'idle',
-  completed: 'done',
-  failed: 'fail',
-  killed: 'fail',
-}
+const AGENT_STATUS: Record<AgentInfo["status"], OrchestraStatus> = {
+  pending: "run",
+  running: "run",
+  waiting: "hold",
+  idle: "idle",
+  completed: "done",
+  failed: "fail",
+  killed: "fail",
+};
 
 const emptyHistory = (now: number): OrchestraHistory => ({
   sessionStartedAt: now,
@@ -78,7 +84,7 @@ const emptyHistory = (now: number): OrchestraHistory => ({
   lastUsd: 0,
   sideSessions: [],
   agents: {},
-})
+});
 
 // The hot path reads module state; refresh() saves `history` to $.state and session.start loads it back.
 const live = {
@@ -86,210 +92,219 @@ const live = {
   /** How many nodes waited on the person at the last refresh; the status and toast fire on its changes. */
   waitCount: 0,
   timer: undefined as Timer | undefined,
-  mainStatus: 'idle' as OrchestraStatus,
+  mainStatus: "idle" as OrchestraStatus,
   waitingSince: undefined as number | undefined,
   ctxPercent: undefined as number | undefined,
   costUsd: undefined as number | undefined,
-  coarseSig: '',
+  coarseSig: "",
   /** Agents whose permission prompt is up, with its message; cleared once their call goes through. */
   needsYou: {} as Record<string, string>,
-  fineSig: '',
+  fineSig: "",
   /** The desktop pane's last SVG, reused while its key (shape and status) holds. */
   svg: undefined as { key: string; at: number; source: string } | undefined,
   lastWriteAt: 0,
   history: emptyHistory(0),
-}
+};
 
-export const register: Register = on => {
-  on('session.start', async ($, e, next) => {
+export const register: Register = (on) => {
+  on("session.start", async ($, e, next) => {
     await $.command.register({
-      name: 'orchestra',
-      description: 'Orchestra view for this session: on, off, view, all (unfold), open <agent>, or export (copy the overview)',
-      argumentHint: 'on|off|view|all|open <agent>|export',
-    })
+      name: "orchestra",
+      description:
+        "Orchestra view for this session: on, off, view, all (unfold), open <agent>, or export (copy the overview)",
+      argumentHint: "on|off|view|all|open <agent>|export",
+    });
     // A history saved by an older version lacks the newer fields; the empty one fills them.
-    live.history = { ...emptyHistory(await $.clock.now()), ...(await read($, historyAtom)) }
+    live.history = { ...emptyHistory(await $.clock.now()), ...(await read($, historyAtom)) };
     // Cost spent before the mod loaded belongs to no agent it saw.
-    live.history.lastUsd = Math.max(live.history.lastUsd, (await sessionUsd($)) ?? 0)
-    live.isOn = await read($, isOnAtom)
+    live.history.lastUsd = Math.max(live.history.lastUsd, (await sessionUsd($)) ?? 0);
+    live.isOn = await read($, isOnAtom);
     if (live.isOn) {
-      startTicking($)
+      startTicking($);
     }
 
-    return next(e)
-  })
+    return next(e);
+  });
 
-  on('command.run', { command: 'orchestra' }, async ($, e) => {
-    const [verb = '', ...rest] = e.args.trim().split(/\s+/)
-    const arg = verb.toLowerCase()
-    if (arg === 'on' || arg === 'off') {
-      await setOn($, arg === 'on')
+  on("command.run", { command: "orchestra" }, async ($, e) => {
+    const [verb = "", ...rest] = e.args.trim().split(/\s+/);
+    const arg = verb.toLowerCase();
+    if (arg === "on" || arg === "off") {
+      await setOn($, arg === "on");
 
-      return { text: `Orchestra is ${arg} for this session.` }
+      return { text: `Orchestra is ${arg} for this session.` };
     }
-    if (arg === 'all') {
-      const isOpen = !(await read($, foldAtom))
-      await update($, foldAtom, () => isOpen)
+    if (arg === "all") {
+      const isOpen = !(await read($, foldAtom));
+      await update($, foldAtom, () => isOpen);
 
-      return { text: isOpen ? 'Showing every finished agent.' : 'Folding finished agents again.' }
+      return { text: isOpen ? "Showing every finished agent." : "Folding finished agents again." };
     }
-    if (arg === 'open') {
+    if (arg === "open") {
       // A command is the person's own input, so it may switch the main view.
-      const target = findNode(await read($, graphAtom), rest.join(' '))
-      if (!target || target.kind === 'session') {
-        return { text: `No agent matches "${rest.join(' ')}". Hover a card to see its id.` }
+      const target = findNode(await read($, graphAtom), rest.join(" "));
+      if (!target || target.kind === "session") {
+        return { text: `No agent matches "${rest.join(" ")}". Hover a card to see its id.` };
       }
-      const moved = await $.ui.view(target.kind === 'agent' ? { agentId: target.id } : {})
+      const moved = await $.ui.view(target.kind === "agent" ? { agentId: target.id } : {});
 
-      return { text: moved.deny ? `Could not open it: ${moved.deny}` : `Showing ${target.label}.` }
+      return { text: moved.deny ? `Could not open it: ${moved.deny}` : `Showing ${target.label}.` };
     }
-    if (arg === 'export') {
-      const copied = await $.ui.copy({ text: overview(await read($, graphAtom)) })
+    if (arg === "export") {
+      const copied = await $.ui.copy({ text: overview(await read($, graphAtom)) });
 
-      return { text: copied.isCopied ? 'Orchestra overview copied.' : `Could not copy (${copied.reason}).` }
+      return {
+        text: copied.isCopied ? "Orchestra overview copied." : `Could not copy (${copied.reason}).`,
+      };
     }
-    if (arg !== '' && arg !== 'view') {
-      return { text: 'Usage: /orchestra on|off|view|all|open <agent>|export' }
+    if (arg !== "" && arg !== "view") {
+      return { text: "Usage: /orchestra on|off|view|all|open <agent>|export" };
     }
-    const opened = await $.ui.open({ id: PANE, title: 'Orchestra' })
+    const opened = await $.ui.open({ id: PANE, title: "Orchestra" });
 
     return {
       text: opened.isPlaced
-        ? 'Orchestra view opened.'
-        : `Orchestra view is waiting for room: ${opened.reason ?? 'not placed'}.`,
-    }
-  })
+        ? "Orchestra view opened."
+        : `Orchestra view is waiting for room: ${opened.reason ?? "not placed"}.`,
+    };
+  });
 
-  on('prompt.submit', async ($, e, next) => {
-    await setMainStatus($, 'run')
+  on("prompt.submit", async ($, e, next) => {
+    await setMainStatus($, "run");
 
-    return next(e)
-  })
+    return next(e);
+  });
 
-  on('turn.start', async ($, e, next) => {
-    await setMainStatus($, 'run')
+  on("turn.start", async ($, e, next) => {
+    await setMainStatus($, "run");
 
-    return next(e)
-  })
+    return next(e);
+  });
 
-  on('turn.complete', async ($, e, next) => {
-    const result = await next(e)
-    await setMainStatus($, 'idle')
-    live.history.mainModel = result.usage?.model ?? live.history.mainModel
-    void refresh($)
+  on("turn.complete", async ($, e, next) => {
+    const result = await next(e);
+    await setMainStatus($, "idle");
+    live.history.mainModel = result.usage?.model ?? live.history.mainModel;
+    void refresh($);
 
-    return result
-  })
+    return result;
+  });
 
-  on('classic.Notification', async ($, e, next) => {
+  on("classic.Notification", async ($, e, next) => {
     if (e.agent_id) {
-      live.needsYou[e.agent_id] = e.message
+      live.needsYou[e.agent_id] = e.message;
     } else {
-      await setMainStatus($, 'wait')
+      await setMainStatus($, "wait");
     }
-    void refresh($)
+    void refresh($);
 
-    return next(e)
-  })
+    return next(e);
+  });
 
-  on('turn.step', async function* ($, e, next) {
-    const result = yield* next(e)
+  on("turn.step", async function* ($, e, next) {
+    const result = yield* next(e);
     if (live.isOn && result.usage) {
-      const u = result.usage
-      const tokens = u.input_tokens + u.output_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens
-      attributeCost(live.history, e.agentId ?? MAIN, await sessionUsd($), tokens)
+      const u = result.usage;
+      const tokens =
+        u.input_tokens +
+        u.output_tokens +
+        u.cache_read_input_tokens +
+        u.cache_creation_input_tokens;
+      attributeCost(live.history, e.agentId ?? MAIN, await sessionUsd($), tokens);
     }
 
-    return result
-  })
+    return result;
+  });
 
-  on('session.measure', ($, e, next) => {
-    live.ctxPercent = e.context.percent ?? live.ctxPercent
-    live.costUsd = e.cost?.usd ?? live.costUsd
+  on("session.measure", ($, e, next) => {
+    live.ctxPercent = e.context.percent ?? live.ctxPercent;
+    live.costUsd = e.cost?.usd ?? live.costUsd;
 
-    return next(e)
-  })
+    return next(e);
+  });
 
-  on('agent.spawn', async ($, e, next) => {
-    const result = await next(e)
+  on("agent.spawn", async ($, e, next) => {
+    const result = await next(e);
     if (live.isOn && result.agentId) {
-      live.history.startedAt[result.agentId] = await $.clock.now()
-      live.history.models[result.agentId] = result.model
-      live.history.tasks[result.agentId] = clip(e.prompt.replace(/\s+/g, ' ').trim(), 300)
-      void refresh($)
+      live.history.startedAt[result.agentId] = await $.clock.now();
+      live.history.models[result.agentId] = result.model;
+      live.history.tasks[result.agentId] = clip(e.prompt.replace(/\s+/g, " ").trim(), 300);
+      void refresh($);
     }
 
-    return result
-  })
+    return result;
+  });
 
-  on('classic.SubagentStop', async ($, e, next) => {
+  on("classic.SubagentStop", async ($, e, next) => {
     if (live.isOn) {
-      const firstLine = e.last_assistant_message?.trim().split('\n')[0]
+      const firstLine = e.last_assistant_message?.trim().split("\n")[0];
       if (firstLine) {
-        live.history.results[e.agent_id] = firstLine.slice(0, 200)
+        live.history.results[e.agent_id] = firstLine.slice(0, 200);
       }
-      live.history.endedAt[e.agent_id] ??= await $.clock.now()
-      void refresh($)
+      live.history.endedAt[e.agent_id] ??= await $.clock.now();
+      void refresh($);
     }
 
-    return next(e)
-  })
+    return next(e);
+  });
 
-  on('tool.call', async ($, e, next) => {
+  on("tool.call", async ($, e, next) => {
     if (!live.isOn) {
-      return next(e)
+      return next(e);
     }
-    const tool = String(e.tool)
-    const input = e as unknown as Record<string, unknown>
-    const now = await $.clock.now()
-    const id = e.agentId ?? MAIN
-    record(id, tool, input, now)
+    const tool = String(e.tool);
+    const input = e as unknown as Record<string, unknown>;
+    const now = await $.clock.now();
+    const id = e.agentId ?? MAIN;
+    record(id, tool, input, now);
     if (tool !== START_SESSION_TOOL) {
-      const ran = await next(e)
+      const ran = await next(e);
       // The call went through, so whatever it asked the person is answered.
-      delete live.needsYou[id]
+      delete live.needsYou[id];
 
-      return ran
+      return ran;
     }
-    const args = input as { title?: string; name?: string; prompt?: string; initiation?: string }
+    const args = input as { title?: string; name?: string; prompt?: string; initiation?: string };
     const node: OrchestraNode = {
       id: `session-${e.tool_use_id}`,
       parentId: e.agentId ?? MAIN,
-      kind: 'session',
+      kind: "session",
       // A start from a proposal card carries only proposal_id, no title.
-      label: args.title ?? args.name ?? args.prompt?.slice(0, 40) ?? 'side session',
-      type: args.initiation ?? 'session',
-      status: 'run',
+      label: args.title ?? args.name ?? args.prompt?.slice(0, 40) ?? "side session",
+      type: args.initiation ?? "session",
+      status: "run",
       calls: 0,
       startedAt: now,
       task: args.prompt ? clip(args.prompt, 300) : undefined,
-    }
-    live.history.sideSessions.push(node)
-    const ran = await next(e)
-    node.status = ran.deny !== undefined || ran.isError === true ? 'fail' : 'idle'
-    node.endedAt = await $.clock.now()
-    void refresh($)
+    };
+    live.history.sideSessions.push(node);
+    const ran = await next(e);
+    node.status = ran.deny !== undefined || ran.isError === true ? "fail" : "idle";
+    node.endedAt = await $.clock.now();
+    void refresh($);
 
-    return ran
-  })
+    return ran;
+  });
 
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+  on("ui.render", { component: "AbovePrompt" }, async ($, e, next) => {
     if (e.props.hasSurvey) {
-      return next(e)
+      return next(e);
     }
-    const { Box, Button, Text } = $.ui.resolve(e)
-    const isEnabled = await read($, isOnAtom)
-    const graph = await read($, graphAtom)
+    const { Box, Button, Text } = $.ui.resolve(e);
+    const isEnabled = await read($, isOnAtom);
+    const graph = await read($, graphAtom);
     // The band's one jump: the first agent that is waiting on the person.
-    const waiting = isEnabled ? graph.nodes.find(n => n.kind === 'agent' && n.status === 'wait') : undefined
+    const waiting = isEnabled
+      ? graph.nodes.find((n) => n.kind === "agent" && n.status === "wait")
+      : undefined;
 
     return (
       <Box flexDirection="row" gap={1}>
         <Text color={isEnabled ? statusColor(graph) : undefined} dimColor={!isEnabled}>
           ●
         </Text>
-        <Text dimColor>{isEnabled ? summarize(graph) : 'orchestra off for this session'}</Text>
-        {...(waiting
+        <Text dimColor>{isEnabled ? summarize(graph) : "orchestra off for this session"}</Text>
+        {...waiting
           ? [
               <Button
                 key="jump"
@@ -298,47 +313,54 @@ export const register: Register = on => {
                 onPress={() => void $.ui.view({ agentId: waiting.id })}
               />,
             ]
-          : [])}
+          : []}
         <Button
           key="view"
           label="View"
-          onPress={() => void $.ui.open({ id: PANE, title: 'Orchestra' })}
+          onPress={() => void $.ui.open({ id: PANE, title: "Orchestra" })}
         />
         <Button
           key="toggle"
-          label={isEnabled ? 'On' : 'Off'}
-          variant={isEnabled && !waiting ? 'primary' : 'secondary'}
+          label={isEnabled ? "On" : "Off"}
+          variant={isEnabled && !waiting ? "primary" : "secondary"}
           onPress={() => setOn($, !isEnabled)}
         />
       </Box>
-    )
-  })
+    );
+  });
 
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Button, Text } = $.ui.resolve(e)
-    const isEnabled = await read($, isOnAtom)
-    const graph = await read($, graphAtom)
-    const isFoldOpen = await read($, foldAtom)
-    const header = isEnabled ? totals(graph) : `Off for this session. No events recorded. ${totals(graph)}`
+  on("ui.render", { component: "Pane", requestId: PANE }, async ($, e) => {
+    const { Box, Button, Text } = $.ui.resolve(e);
+    const isEnabled = await read($, isOnAtom);
+    const graph = await read($, graphAtom);
+    const isFoldOpen = await read($, foldAtom);
+    const header = isEnabled
+      ? totals(graph)
+      : `Off for this session. No events recorded. ${totals(graph)}`;
     const copy = async () => {
       // The latest graph, not the one this draw was made from.
-      const copied = await $.ui.copy({ text: overview(await read($, graphAtom)), surface: e.surface })
-      $.ui.toast(copied.isCopied ? 'Orchestra overview copied' : `Could not copy (${copied.reason})`)
-    }
+      const copied = await $.ui.copy({
+        text: overview(await read($, graphAtom)),
+        surface: e.surface,
+      });
+      $.ui.toast(
+        copied.isCopied ? "Orchestra overview copied" : `Could not copy (${copied.reason})`,
+      );
+    };
     // The button comes first, so a long totals line can only clip itself, never push it away.
     const headerRow = (
       <Box flexDirection="row" gap={1}>
         <Button key="copy" label="Copy" onPress={() => void copy()} />
         <Text dimColor>{header}</Text>
       </Box>
-    )
+    );
 
-    if (e.surface !== 'terminal') {
+    if (e.surface !== "terminal") {
       // Not reading nowAtom here: each new SVG source reloads its frame, so it redraws only with the graph.
-      const { Svg } = $.ui.resolve(e)
-      const natural = svgSize(graph, isFoldOpen)
+      const { Svg } = $.ui.resolve(e);
+      const natural = svgSize(graph, isFoldOpen);
       // shortcut: the pane's width in pixels is estimated from its cells; measure it if a surface reports pixels.
-      const scale = Math.min(1, (e.props.bodyColumns * PX_PER_COLUMN) / natural.width)
+      const scale = Math.min(1, (e.props.bodyColumns * PX_PER_COLUMN) / natural.width);
 
       return (
         <Box flexDirection="column" gap={1}>
@@ -351,23 +373,39 @@ export const register: Register = on => {
             isInteractive
           />
         </Box>
-      )
+      );
     }
 
-    const now = Math.max(graph.now, await read($, nowAtom))
-    const tree = layoutTree(graph, isFoldOpen)
-    const wires: WiresProps = { wires: tree.wires, width: tree.width, height: tree.height, isPaused: !isEnabled }
+    const now = Math.max(graph.now, await read($, nowAtom));
+    const tree = layoutTree(graph, isFoldOpen);
+    const wires: WiresProps = {
+      wires: tree.wires,
+      width: tree.width,
+      height: tree.height,
+      isPaused: !isEnabled,
+    };
 
     // Switching the main view is allowed only from the person's own press, which these closures are.
-    const openTo = (n: OrchestraNode) => () => void $.ui.view(n.kind === 'agent' ? { agentId: n.id } : {})
+    const openTo = (n: OrchestraNode) => () =>
+      void $.ui.view(n.kind === "agent" ? { agentId: n.id } : {});
 
     const tile = ({ node: n, x, y }: PlacedTile) => {
-      const color = STATUS_COLOR[n.status]
-      const isDone = n.status === 'done'
-      const warnings = flags(n, graph, now)
-      const border = n.status === 'wait' || n.status === 'fail' ? color : n.kind === 'main' ? 'claude' : 'subtle'
-      const kind = n.kind === 'main' ? 'session' : n.kind === 'session' ? 'side session' : `${n.type} · ${n.id.slice(0, 6)}`
-      const title = clip(n.label, TILE_W - 4)
+      const color = STATUS_COLOR[n.status];
+      const isDone = n.status === "done";
+      const warnings = flags(n, graph, now);
+      const border =
+        n.status === "wait" || n.status === "fail"
+          ? color
+          : n.kind === "main"
+            ? "claude"
+            : "subtle";
+      const kind =
+        n.kind === "main"
+          ? "session"
+          : n.kind === "session"
+            ? "side session"
+            : `${n.type} · ${n.id.slice(0, 6)}`;
+      const title = clip(n.label, TILE_W - 4);
 
       return (
         <Box
@@ -382,7 +420,7 @@ export const register: Register = on => {
           borderColor={border}
           borderDimColor={isDone}
           paddingX={1}
-          hover={{ scope: `t-${n.id}`, borderColor: 'text' }}
+          hover={{ scope: `t-${n.id}`, borderColor: "text" }}
         >
           <Box flexDirection="row" justifyContent="space-between">
             <Text dimColor>{clip(kind, TILE_W - 6)}</Text>
@@ -390,7 +428,7 @@ export const register: Register = on => {
               ●
             </Text>
           </Box>
-          {n.kind === 'session' ? (
+          {n.kind === "session" ? (
             <Text bold>{title}</Text>
           ) : (
             <Button key={`open-${n.id}`} plain onPress={openTo(n)}>
@@ -402,25 +440,30 @@ export const register: Register = on => {
           <Text dimColor>{clip(meta(n, graph, now), TILE_W - 4)}</Text>
           <Text
             italic
-            color={n.status === 'wait' ? 'warning' : n.status === 'fail' ? 'error' : undefined}
-            dimColor={n.status !== 'wait' && n.status !== 'fail'}
+            color={n.status === "wait" ? "warning" : n.status === "fail" ? "error" : undefined}
+            dimColor={n.status !== "wait" && n.status !== "fail"}
           >
             {clip(note(n), TILE_W - 4)}
           </Text>
-          <Text color="warning">{warnings.length ? `⚑ ${clip(warnings.join(' · '), TILE_W - 6)}` : ' '}</Text>
+          <Text color="warning">
+            {warnings.length ? `⚑ ${clip(warnings.join(" · "), TILE_W - 6)}` : " "}
+          </Text>
         </Box>
-      )
-    }
+      );
+    };
 
     // Drawn after every tile, so it paints over the tiles below its own.
     const card = ({ node: n, x, y }: PlacedTile) => {
       const lines: [string, string][] = [
-        ['Task', n.task],
-        [n.status === 'wait' ? 'Waiting on' : 'Now', n.status === 'done' ? undefined : n.action],
-        ['Result', n.result],
-        ['Edited', n.edited?.map(f => f.split('/').pop()).join(', ')],
-        ['Started', `${age(n.startedAt, now)} ago${n.endedAt ? ` · took ${age(n.startedAt, n.endedAt)}` : ''}`],
-      ].filter((line): line is [string, string] => Boolean(line[1]))
+        ["Task", n.task],
+        [n.status === "wait" ? "Waiting on" : "Now", n.status === "done" ? undefined : n.action],
+        ["Result", n.result],
+        ["Edited", n.edited?.map((f) => f.split("/").pop()).join(", ")],
+        [
+          "Started",
+          `${age(n.startedAt, now)} ago${n.endedAt ? ` · took ${age(n.startedAt, n.endedAt)}` : ""}`,
+        ],
+      ].filter((line): line is [string, string] => Boolean(line[1]));
 
       return (
         <Box
@@ -431,7 +474,7 @@ export const register: Register = on => {
           width={CARD_W}
           flexDirection="column"
           display="none"
-          hover={{ scope: `t-${n.id}`, display: 'flex' }}
+          hover={{ scope: `t-${n.id}`, display: "flex" }}
           borderStyle="round"
           borderColor="subtle"
           backgroundColor="inverseText"
@@ -443,14 +486,16 @@ export const register: Register = on => {
               {clip(value, 240)}
             </Text>
           ))}
-          {n.kind === 'agent' ? (
+          {n.kind === "agent" ? (
             <Button key={`jump-${n.id}`} label="Open conversation" onPress={openTo(n)} />
           ) : (
-            <Text dimColor>{n.kind === 'main' ? 'Click the title to return to the main conversation' : ' '}</Text>
+            <Text dimColor>
+              {n.kind === "main" ? "Click the title to return to the main conversation" : " "}
+            </Text>
           )}
         </Box>
-      )
-    }
+      );
+    };
 
     const foldTile = (f: PlacedFold) => (
       <Box
@@ -466,20 +511,27 @@ export const register: Register = on => {
         paddingX={1}
       >
         <Button key={`fold-${f.parentId}`} plain onPress={() => update($, foldAtom, () => true)}>
-          <Text dimColor>▸ {plural(f.count, 'finished agent')} · show</Text>
+          <Text dimColor>▸ {plural(f.count, "finished agent")} · show</Text>
         </Button>
       </Box>
-    )
+    );
 
     // Only the terminal reaches here; its Client animates the wires behind the tiles.
-    const { Client } = $.ui.resolve(e)
+    const { Client } = $.ui.resolve(e);
     const wireLayer = [
       <Box position="absolute" top={0} left={0}>
-        <Client key="wires" module="./wires.tsx" props={wires} width={tree.width} height={tree.height} />
+        <Client
+          key="wires"
+          module="./wires.tsx"
+          props={wires}
+          width={tree.width}
+          height={tree.height}
+        />
       </Box>,
-    ]
+    ];
 
-    const hasOpenFold = isFoldOpen && graph.nodes.filter(n => n.status === 'done').length > FOLD_AFTER
+    const hasOpenFold =
+      isFoldOpen && graph.nodes.filter((n) => n.status === "done").length > FOLD_AFTER;
 
     return (
       <Box flexDirection="column" gap={1}>
@@ -490,67 +542,67 @@ export const register: Register = on => {
           {tree.folds.map(foldTile)}
           {tree.tiles.map(card)}
         </Box>
-        {...(hasOpenFold
+        {...hasOpenFold
           ? [
               <Button key="fold-close" plain onPress={() => update($, foldAtom, () => false)}>
                 <Text dimColor>▾ fold finished agents</Text>
               </Button>,
             ]
-          : [])}
+          : []}
       </Box>
-    )
-  })
-}
+    );
+  });
+};
 
 function record(id: string, tool: string, input: Record<string, unknown>, now: number) {
-  const h = live.history
-  const c = h.counters[id] ?? { calls: 0 }
-  h.counters[id] = { calls: c.calls + 1, lastTool: tool, lastAt: now }
-  const action = describeAction(tool, input)
-  h.actions[id] = action
-  const seen = (h.seen[id] ??= {})
+  const h = live.history;
+  const c = h.counters[id] ?? { calls: 0 };
+  h.counters[id] = { calls: c.calls + 1, lastTool: tool, lastAt: now };
+  const action = describeAction(tool, input);
+  h.actions[id] = action;
+  const seen = (h.seen[id] ??= {});
   if (seen[action] !== undefined || Object.keys(seen).length < SEEN_CAP) {
-    seen[action] = (seen[action] ?? 0) + 1
+    seen[action] = (seen[action] ?? 0) + 1;
   }
-  const file = editedFile(tool, input)
+  const file = editedFile(tool, input);
   if (file && !(h.edited[id] ?? []).includes(file)) {
-    h.edited[id] = [...(h.edited[id] ?? []), file]
+    h.edited[id] = [...(h.edited[id] ?? []), file];
   }
 }
 
-function repeatOf(id: string): OrchestraNode['repeat'] {
-  const entries = Object.entries(live.history.seen[id] ?? {})
-  const top = entries.sort((a, b) => b[1] - a[1])[0]
+function repeatOf(id: string): OrchestraNode["repeat"] {
+  const entries = Object.entries(live.history.seen[id] ?? {});
+  const top = entries.sort((a, b) => b[1] - a[1])[0];
 
-  return top ? { action: top[0], count: top[1] } : undefined
+  return top ? { action: top[0], count: top[1] } : undefined;
 }
 
 /** The session's running cost, or undefined where the host keeps no ledger or cannot say. */
 async function sessionUsd($: EngineInterface): Promise<number | undefined> {
   try {
-    return (await $.session.usage()).cost?.usd
+    return (await $.session.usage()).cost?.usd;
   } catch {
     // A missing cost must not stop the view: tokens still count.
-    return undefined
+    return undefined;
   }
 }
 
 async function setMainStatus($: EngineInterface, status: OrchestraStatus) {
-  const now = await $.clock.now()
-  if (live.waitingSince !== undefined && status !== 'wait') {
-    live.history.waitMs += now - live.waitingSince
-    live.waitingSince = undefined
+  const now = await $.clock.now();
+  if (live.waitingSince !== undefined && status !== "wait") {
+    live.history.waitMs += now - live.waitingSince;
+    live.waitingSince = undefined;
   }
-  if (status === 'wait' && live.waitingSince === undefined) {
-    live.waitingSince = now
+  if (status === "wait" && live.waitingSince === undefined) {
+    live.waitingSince = now;
   }
-  live.mainStatus = status
+  live.mainStatus = status;
 }
 
 async function snapshot($: EngineInterface): Promise<OrchestraGraph> {
-  const now = await $.clock.now()
-  const agents = await $.agent.list()
-  const h = live.history
+  const now = await $.clock.now();
+  const agents = await $.agent.list();
+  const h = live.history;
   const details = (id: string) => ({
     ...(h.counters[id] ?? { calls: 0 }),
     task: h.tasks[id],
@@ -559,35 +611,44 @@ async function snapshot($: EngineInterface): Promise<OrchestraGraph> {
     repeat: repeatOf(id),
     costUsd: h.costs[id],
     tokens: h.tokens[id],
-  })
+  });
   const nodes: OrchestraNode[] = [
     {
       id: MAIN,
       parentId: null,
-      kind: 'main',
-      label: 'this session',
-      type: 'session',
+      kind: "main",
+      label: "this session",
+      type: "session",
       status: live.mainStatus,
       model: h.mainModel,
       startedAt: h.sessionStartedAt,
       ...details(MAIN),
     },
-  ]
+  ];
   for (const a of agents) {
-    h.agents[a.id] = { label: a.description || a.name || a.type, type: a.type, parentId: a.parentId ?? MAIN, status: AGENT_STATUS[a.status] }
+    h.agents[a.id] = {
+      label: a.description || a.name || a.type,
+      type: a.type,
+      parentId: a.parentId ?? MAIN,
+      status: AGENT_STATUS[a.status],
+    };
   }
-  const listed = new Set(agents.map(a => a.id))
+  const listed = new Set(agents.map((a) => a.id));
   for (const [id, a] of Object.entries(h.agents)) {
     // The list drops an agent once it ends (a nested one, say); keep it, as finished, for the overview.
-    const status = live.needsYou[id] ? 'wait' : listed.has(id) || a.status === 'fail' ? a.status : 'done'
-    h.startedAt[id] ??= now
-    if (status === 'done' || status === 'fail') {
-      h.endedAt[id] ??= now
+    const status = live.needsYou[id]
+      ? "wait"
+      : listed.has(id) || a.status === "fail"
+        ? a.status
+        : "done";
+    h.startedAt[id] ??= now;
+    if (status === "done" || status === "fail") {
+      h.endedAt[id] ??= now;
     }
     nodes.push({
       id,
       parentId: a.parentId,
-      kind: 'agent',
+      kind: "agent",
       label: a.label,
       type: a.type,
       status,
@@ -596,10 +657,10 @@ async function snapshot($: EngineInterface): Promise<OrchestraGraph> {
       endedAt: h.endedAt[id],
       result: h.results[id],
       ...details(id),
-    })
+    });
   }
-  nodes.push(...h.sideSessions.map(n => ({ ...n })))
-  h.peak = Math.max(h.peak, nodes.filter(n => n.kind !== 'main' && n.status === 'run').length)
+  nodes.push(...h.sideSessions.map((n) => ({ ...n })));
+  h.peak = Math.max(h.peak, nodes.filter((n) => n.kind !== "main" && n.status === "run").length);
 
   return {
     nodes,
@@ -609,103 +670,128 @@ async function snapshot($: EngineInterface): Promise<OrchestraGraph> {
     peak: h.peak,
     startedAt: h.sessionStartedAt,
     now,
-  }
+  };
 }
 
 async function refresh($: EngineInterface): Promise<OrchestraGraph | undefined> {
   if (!live.isOn) {
-    return undefined
+    return undefined;
   }
-  const graph = await snapshot($)
+  const graph = await snapshot($);
   // Agents only, as the band's jump is: the main loop's own prompt is already in front of the person.
-  const waiting = graph.nodes.filter(n => n.kind === 'agent' && n.status === 'wait')
+  const waiting = graph.nodes.filter((n) => n.kind === "agent" && n.status === "wait");
   if (waiting.length !== live.waitCount) {
     if (live.waitCount === 0 && waiting[0]) {
-      $.ui.toast(`${clip(waiting[0].label, 40)} needs you`)
+      $.ui.toast(`${clip(waiting[0].label, 40)} needs you`);
     }
-    $.ui.status(waiting.length ? `${waiting.length} need you` : undefined)
-    live.waitCount = waiting.length
+    $.ui.status(waiting.length ? `${waiting.length} need you` : undefined);
+    live.waitCount = waiting.length;
   }
-  const { coarse, fine } = signatures(graph)
-  const isCoarse = coarse !== live.coarseSig
+  const { coarse, fine } = signatures(graph);
+  const isCoarse = coarse !== live.coarseSig;
   // Structure and status redraw at once; counts and current actions at most every FINE_REDRAW_MS,
   // since each redraw reloads the desktop's SVG frame.
-  const isFineDue = fine !== live.fineSig && graph.now - live.lastWriteAt >= FINE_REDRAW_MS
+  const isFineDue = fine !== live.fineSig && graph.now - live.lastWriteAt >= FINE_REDRAW_MS;
   if (isCoarse || isFineDue) {
-    live.coarseSig = coarse
-    live.fineSig = fine
-    live.lastWriteAt = graph.now
-    await update($, graphAtom, () => graph)
-    await update($, historyAtom, () => JSON.parse(JSON.stringify(live.history)) as OrchestraHistory)
+    live.coarseSig = coarse;
+    live.fineSig = fine;
+    live.lastWriteAt = graph.now;
+    await update($, graphAtom, () => graph);
+    await update(
+      $,
+      historyAtom,
+      () => JSON.parse(JSON.stringify(live.history)) as OrchestraHistory,
+    );
   }
 
-  return graph
+  return graph;
 }
 
 /**
  * The desktop pane's SVG. The last one is reused until the graph changes in shape or status, or the refresh is due,
  * so the frame is not reloaded for every count or age; those go stale in it meanwhile (the header text stays live).
  */
-async function svgSource($: EngineInterface, graph: OrchestraGraph, isFoldOpen: boolean, isPaused: boolean): Promise<string> {
-  const now = await $.clock.now()
-  const key = `${signatures(graph).coarse}|${isFoldOpen}|${isPaused}`
-  let cached = live.svg
+async function svgSource(
+  $: EngineInterface,
+  graph: OrchestraGraph,
+  isFoldOpen: boolean,
+  isPaused: boolean,
+): Promise<string> {
+  const now = await $.clock.now();
+  const key = `${signatures(graph).coarse}|${isFoldOpen}|${isPaused}`;
+  let cached = live.svg;
   if (!cached || cached.key !== key || now - cached.at >= SVG_REFRESH_MS) {
-    cached = { key, at: now, source: renderGraphSvg(graph, { isPaused, isFoldOpen, now: graph.now, phase: now }) }
-    live.svg = cached
+    cached = {
+      key,
+      at: now,
+      source: renderGraphSvg(graph, { isPaused, isFoldOpen, now: graph.now, phase: now }),
+    };
+    live.svg = cached;
   }
 
-  return cached.source
+  return cached.source;
 }
 
 /** What changes the drawing's shape (coarse) and what only changes its numbers and lines (fine). */
 function signatures(graph: OrchestraGraph): { coarse: string; fine: string } {
   // The flag count, so a flag that turns on with time alone (a quiet agent makes no calls) still redraws.
-  const coarse = graph.nodes.map(n => [n.id, n.parentId, n.status, n.label, n.result, n.edited?.length, (n.repeat?.count ?? 0) >= 4, flags(n, graph, graph.now).length])
-  const fine = graph.nodes.map(n => [n.id, n.calls, n.action, n.model, n.costUsd, n.tokens])
+  const coarse = graph.nodes.map((n) => [
+    n.id,
+    n.parentId,
+    n.status,
+    n.label,
+    n.result,
+    n.edited?.length,
+    (n.repeat?.count ?? 0) >= 4,
+    flags(n, graph, graph.now).length,
+  ]);
+  const fine = graph.nodes.map((n) => [n.id, n.calls, n.action, n.model, n.costUsd, n.tokens]);
 
   return {
     coarse: JSON.stringify(coarse),
     fine: JSON.stringify([fine, graph.costUsd, graph.ctxPercent, graph.waitMs, graph.peak]),
-  }
+  };
 }
 
 /** The node `/orchestra open <query>` means: `main`, an id prefix, or a label fragment. */
 function findNode(graph: OrchestraGraph, query: string): OrchestraNode | undefined {
-  const q = query.trim().toLowerCase()
-  if (q === '') {
-    return undefined
+  const q = query.trim().toLowerCase();
+  if (q === "") {
+    return undefined;
   }
-  if (q === 'main' || q === 'session') {
-    return graph.nodes.find(n => n.kind === 'main')
+  if (q === "main" || q === "session") {
+    return graph.nodes.find((n) => n.kind === "main");
   }
 
-  return graph.nodes.find(n => n.id.toLowerCase().startsWith(q)) ?? graph.nodes.find(n => n.label.toLowerCase().includes(q))
+  return (
+    graph.nodes.find((n) => n.id.toLowerCase().startsWith(q)) ??
+    graph.nodes.find((n) => n.label.toLowerCase().includes(q))
+  );
 }
 
 async function tick($: EngineInterface) {
-  const graph = await refresh($)
+  const graph = await refresh($);
   // Ages only move while something runs; an idle session draws nothing new.
-  if (graph?.nodes.some(n => isLive(n.status))) {
-    await update($, nowAtom, () => graph.now)
+  if (graph?.nodes.some((n) => isLive(n.status))) {
+    await update($, nowAtom, () => graph.now);
   }
 }
 
 function startTicking($: EngineInterface) {
-  live.timer?.cancel()
-  live.timer = $.clock.every(TICK_MS, () => void tick($))
-  void refresh($)
+  live.timer?.cancel();
+  live.timer = $.clock.every(TICK_MS, () => void tick($));
+  void refresh($);
 }
 
 async function setOn($: EngineInterface, value: boolean) {
-  live.isOn = value
-  await update($, isOnAtom, () => value)
+  live.isOn = value;
+  await update($, isOnAtom, () => value);
   if (value) {
-    startTicking($)
+    startTicking($);
   } else {
-    live.timer?.cancel()
-    live.timer = undefined
-    $.ui.status(undefined)
-    live.waitCount = 0
+    live.timer?.cancel();
+    live.timer = undefined;
+    $.ui.status(undefined);
+    live.waitCount = 0;
   }
 }
