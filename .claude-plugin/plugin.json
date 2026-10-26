@@ -1,0 +1,6 @@
+{
+  "name": "orchestra",
+  "version": "0.1.0",
+  "description": "Live module graph of this session's subagents and side sessions, with a per-session switch above the prompt",
+  "types": "./types/index.d.ts"
+}
