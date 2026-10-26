@@ -416,7 +416,7 @@ export const register: Register = (on) => {
         <Svg
           key="bar"
           source={renderBarSvg(head.counts, e.props.bodyColumns * PX_PER_COLUMN)}
-          height={16}
+          height={14}
           alt={head.state || "no agents yet"}
         />
       );
@@ -427,17 +427,16 @@ export const register: Register = (on) => {
       <Box
         flexDirection="column"
         borderStyle="round"
-        borderColor="subtle"
+        // Translucent on the desktop, so it is light in both themes; the terminal keeps a theme key.
+        borderColor={e.surface === "terminal" ? "subtle" : "rgba(128,128,128,0.3)"}
         borderDimColor
         paddingX="sm"
         paddingY="sm"
       >
         <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
           <Box flexDirection="row" gap={1} flexShrink={1}>
-            <Text size="heading" weight="semibold">
-              {head.agents}
-            </Text>
-            <Text dimColor>
+            <Text weight="semibold">{head.agents}</Text>
+            <Text size="footnote" dimColor>
               {isEnabled
                 ? head.state || "no agents yet"
                 : "off for this session, no events recorded"}
@@ -446,7 +445,9 @@ export const register: Register = (on) => {
           <Button key="copy" label="Copy" onPress={() => void copy()} />
         </Box>
         {bar}
-        <Text dimColor>{figures.flatMap((f, i) => (i ? [" · ", f] : [f]))}</Text>
+        <Text size="footnote" dimColor>
+          {figures.flatMap((f, i) => (i ? [" · ", f] : [f]))}
+        </Text>
       </Box>
     );
 
