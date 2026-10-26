@@ -241,6 +241,11 @@ export function outline(graph: OrchestraGraph): string {
   return lines.join('\n')
 }
 
+/** The session's totals line above its outline: what the Copy button and /orchestra export put on the clipboard. */
+export function overview(graph: OrchestraGraph): string {
+  return `${totals(graph)}\n\n${outline(graph)}`
+}
+
 export function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? '' : 's'}`
 }

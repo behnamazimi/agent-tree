@@ -15,7 +15,7 @@ import {
   layoutTree,
   meta,
   note,
-  outline,
+  overview,
   plural,
   STATUS_COLOR,
   statusColor,
@@ -104,7 +104,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'orchestra',
-      description: 'Orchestra view for this session: on, off, view, all (unfold), open <agent>, or export (copy an outline)',
+      description: 'Orchestra view for this session: on, off, view, all (unfold), open <agent>, or export (copy the overview)',
       argumentHint: 'on|off|view|all|open <agent>|export',
     })
     // A history saved by an older version lacks the newer fields; the empty one fills them.
@@ -144,9 +144,9 @@ export const register: Register = on => {
       return { text: moved.deny ? `Could not open it: ${moved.deny}` : `Showing ${target.label}.` }
     }
     if (arg === 'export') {
-      const copied = await $.ui.copy({ text: outline(await read($, graphAtom)) })
+      const copied = await $.ui.copy({ text: overview(await read($, graphAtom)) })
 
-      return { text: copied.isCopied ? 'Orchestra outline copied.' : `Could not copy (${copied.reason}).` }
+      return { text: copied.isCopied ? 'Orchestra overview copied.' : `Could not copy (${copied.reason}).` }
     }
     if (arg !== '' && arg !== 'view') {
       return { text: 'Usage: /orchestra on|off|view|all|open <agent>|export' }
@@ -320,6 +320,18 @@ export const register: Register = on => {
     const graph = await read($, graphAtom)
     const isFoldOpen = await read($, foldAtom)
     const header = isEnabled ? totals(graph) : `Off for this session. No events recorded. ${totals(graph)}`
+    const copy = async () => {
+      // The latest graph, not the one this draw was made from.
+      const copied = await $.ui.copy({ text: overview(await read($, graphAtom)), surface: e.surface })
+      $.ui.toast(copied.isCopied ? 'Orchestra overview copied' : `Could not copy (${copied.reason})`)
+    }
+    // The button comes first, so a long totals line can only clip itself, never push it away.
+    const headerRow = (
+      <Box flexDirection="row" gap={1}>
+        <Button key="copy" label="Copy" onPress={() => void copy()} />
+        <Text dimColor>{header}</Text>
+      </Box>
+    )
 
     if (e.surface !== 'terminal') {
       // Not reading nowAtom here: each new SVG source reloads its frame, so it redraws only with the graph.
@@ -330,7 +342,7 @@ export const register: Register = on => {
 
       return (
         <Box flexDirection="column" gap={1}>
-          <Text dimColor>{header}</Text>
+          {headerRow}
           <Svg
             source={await svgSource($, graph, isFoldOpen, !isEnabled)}
             width={Math.round(natural.width * scale)}
@@ -471,7 +483,7 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="column" gap={1}>
-        <Text dimColor>{header}</Text>
+        {headerRow}
         <Box width={tree.width + CARD_W} height={tree.height + CARD_ROOM}>
           {...wireLayer}
           {tree.tiles.map(tile)}

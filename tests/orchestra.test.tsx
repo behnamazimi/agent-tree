@@ -297,6 +297,36 @@ test('an agent that starts waiting on you raises one toast and a status line, cl
   expect(statuses.at(-1)).toBeUndefined()
 })
 
+for (const surface of SURFACES) {
+  test(`the pane's Copy button copies the totals and the outline on the ${surface}`, async ($, on) => {
+    const clock = mock.clock(on)
+    engine(on)
+    const copied: string[] = []
+    const toasts: string[] = []
+    on('ui.copy', (_, e) => {
+      copied.push(e.text)
+
+      return { value: { isCopied: true } }
+    })
+    on('ui.toast', (_, e, next) => {
+      toasts.push(e.text)
+
+      return next(e)
+    })
+    await $.session.start({ cwd: '/', surface, isInteractive: true })
+    await clock.advance(1100)
+
+    const pane = await $.ui.mount({ ...PANE, surface })
+    expect((await pane.find({ key: 'copy' }))?.props.label).toBe('Copy')
+    await pane.press({ key: 'copy' })
+    expect(copied[0]).toMatch(/^3 agents/)
+    expect(copied[0]).toContain('- **this session**')
+    expect(copied[0]).toContain('    - **Nested scan**')
+    expect(toasts).toEqual(['Orchestra overview copied'])
+    await pane.unmount()
+  })
+}
+
 test('/orchestra export copies an outline with nested agents indented', async ($, on) => {
   const clock = mock.clock(on)
   engine(on)
@@ -309,7 +339,7 @@ test('/orchestra export copies an outline with nested agents indented', async ($
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await clock.advance(1100)
 
-  expect((await run($, 'export')).text).toBe('Orchestra outline copied.')
+  expect((await run($, 'export')).text).toBe('Orchestra overview copied.')
   expect(copied[0]).toContain('- **this session**')
   expect(copied[0]).toContain('  - **Search the repo**')
   expect(copied[0]).toContain('    - **Nested scan**')
