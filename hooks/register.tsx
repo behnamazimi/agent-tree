@@ -18,6 +18,7 @@ import {
   overview,
   plural,
   STATUS_COLOR,
+  stats,
   statusColor,
   summarize,
   TILE_H,
@@ -54,7 +55,7 @@ const historyAtom = atom(
   null as OrchestraHistory | null,
 );
 const nowAtom = atom({ plugin: "orchestra", key: "now" } as const, 0);
-const foldAtom = atom({ plugin: "orchestra", key: "isFoldOpen" } as const, false);
+const foldAtom = atom({ plugin: "orchestra", key: "isFoldOpen" } as const, true);
 
 const AGENT_STATUS: Record<AgentInfo["status"], OrchestraStatus> = {
   pending: "run",
@@ -99,6 +100,8 @@ const live = {
   coarseSig: "",
   /** Agents whose permission prompt is up, with its message; cleared once their call goes through. */
   needsYou: {} as Record<string, string>,
+  /** Agent tool call id to the agent it started, so the call's result text can become that agent's result. */
+  spawned: {} as Record<string, string>,
   fineSig: "",
   /** The desktop pane's last SVG, reused while its key (shape and status) holds. */
   svg: undefined as { key: string; at: number; source: string } | undefined,
@@ -111,7 +114,7 @@ export const register: Register = (on) => {
     await $.command.register({
       name: "orchestra",
       description:
-        "Orchestra view for this session: on, off, view, all (unfold), open <agent>, or export (copy the overview)",
+        "Orchestra view for this session: on, off, view, all (fold or unfold finished agents), open <agent>, or export (copy the overview)",
       argumentHint: "on|off|view|all|open <agent>|export",
     });
     // A history saved by an older version lacks the newer fields; the empty one fills them.
@@ -182,12 +185,15 @@ export const register: Register = (on) => {
   });
 
   on("turn.complete", async ($, e, next) => {
-    const result = await next(e);
-    await setMainStatus($, "idle");
-    live.history.mainModel = result.usage?.model ?? live.history.mainModel;
-    void refresh($);
+    try {
+      const result = await next(e);
+      live.history.mainModel = result.usage?.model ?? live.history.mainModel;
 
-    return result;
+      return result;
+    } finally {
+      await setMainStatus($, "idle");
+      kick($);
+    }
   });
 
   on("classic.Notification", async ($, e, next) => {
@@ -196,7 +202,7 @@ export const register: Register = (on) => {
     } else {
       await setMainStatus($, "wait");
     }
-    void refresh($);
+    kick($);
 
     return next(e);
   });
@@ -226,10 +232,11 @@ export const register: Register = (on) => {
   on("agent.spawn", async ($, e, next) => {
     const result = await next(e);
     if (live.isOn && result.agentId) {
+      live.spawned[e.tool_use_id] = result.agentId;
       live.history.startedAt[result.agentId] = await $.clock.now();
       live.history.models[result.agentId] = result.model;
       live.history.tasks[result.agentId] = clip(e.prompt.replace(/\s+/g, " ").trim(), 300);
-      void refresh($);
+      kick($);
     }
 
     return result;
@@ -238,11 +245,12 @@ export const register: Register = (on) => {
   on("classic.SubagentStop", async ($, e, next) => {
     if (live.isOn) {
       const firstLine = e.last_assistant_message?.trim().split("\n")[0];
+      // The host often sends this empty; the parent's Agent call result then fills it (see tool.call).
       if (firstLine) {
         live.history.results[e.agent_id] = firstLine.slice(0, 200);
       }
       live.history.endedAt[e.agent_id] ??= await $.clock.now();
-      void refresh($);
+      kick($);
     }
 
     return next(e);
@@ -258,11 +266,19 @@ export const register: Register = (on) => {
     const id = e.agentId ?? MAIN;
     record(id, tool, input, now);
     if (tool !== START_SESSION_TOOL) {
-      const ran = await next(e);
-      // The call went through, so whatever it asked the person is answered.
-      delete live.needsYou[id];
+      try {
+        const ran = await next(e);
+        const agentId = live.spawned[e.tool_use_id];
+        const firstLine = ran.text?.trim().split("\n")[0];
+        if (agentId && firstLine) {
+          live.history.results[agentId] ??= firstLine.slice(0, 200);
+        }
 
-      return ran;
+        return ran;
+      } finally {
+        // The call ended, so whatever it asked the person is answered.
+        delete live.needsYou[id];
+      }
     }
     const args = input as { title?: string; name?: string; prompt?: string; initiation?: string };
     const node: OrchestraNode = {
@@ -278,12 +294,18 @@ export const register: Register = (on) => {
       task: args.prompt ? clip(args.prompt, 300) : undefined,
     };
     live.history.sideSessions.push(node);
-    const ran = await next(e);
-    node.status = ran.deny !== undefined || ran.isError === true ? "fail" : "idle";
-    node.endedAt = await $.clock.now();
-    void refresh($);
+    let status: OrchestraStatus = "fail";
+    try {
+      const ran = await next(e);
+      status = ran.deny !== undefined || ran.isError === true ? "fail" : "idle";
 
-    return ran;
+      return ran;
+    } finally {
+      node.status = status;
+      node.endedAt = await $.clock.now();
+      delete live.needsYou[id];
+      kick($);
+    }
   });
 
   on("ui.render", { component: "AbovePrompt" }, async ($, e, next) => {
@@ -364,7 +386,7 @@ export const register: Register = (on) => {
 
       return (
         <Box flexDirection="column" gap={1}>
-          {headerRow}
+          {isEnabled ? statsHeader(graph, $.ui.resolve(e), copy) : headerRow}
           <Svg
             source={await svgSource($, graph, isFoldOpen, !isEnabled)}
             width={Math.round(natural.width * scale)}
@@ -481,7 +503,7 @@ export const register: Register = (on) => {
           paddingX={1}
         >
           {lines.map(([label, value]) => (
-            <Text dimColor>
+            <Text key={label} dimColor>
               <Text bold>{label}: </Text>
               {clip(value, 240)}
             </Text>
@@ -519,9 +541,9 @@ export const register: Register = (on) => {
     // Only the terminal reaches here; its Client animates the wires behind the tiles.
     const { Client } = $.ui.resolve(e);
     const wireLayer = [
-      <Box position="absolute" top={0} left={0}>
+      <Box key="wires" position="absolute" top={0} left={0}>
         <Client
-          key="wires"
+          key="wires-client"
           module="./wires.tsx"
           props={wires}
           width={tree.width}
@@ -554,6 +576,55 @@ export const register: Register = (on) => {
   });
 };
 
+const STATUS_LABEL: Record<OrchestraStatus, string> = {
+  run: "running",
+  wait: "need you",
+  hold: "held",
+  idle: "idle",
+  done: "done",
+  fail: "failed",
+};
+
+/** The desktop pane's header: status counts and Copy on one row, then a tile per figure. */
+function statsHeader(
+  graph: OrchestraGraph,
+  { Box, Button, Text }: ReturnType<EngineInterface["ui"]["resolve"]>,
+  copy: () => Promise<void>,
+) {
+  const { counts, tiles, top } = stats(graph);
+
+  return (
+    <Box flexDirection="column" gap={1}>
+      <Box flexDirection="row" justifyContent="space-between">
+        <Box flexDirection="row" gap={2}>
+          {counts.map(([status, count]) => (
+            <Text key={status}>
+              <Text color={STATUS_COLOR[status]}>● </Text>
+              <Text bold>{count}</Text> {STATUS_LABEL[status]}
+            </Text>
+          ))}
+        </Box>
+        <Button key="copy" label="Copy" onPress={() => void copy()} />
+      </Box>
+      <Box flexDirection="row" gap={1}>
+        {tiles.map(([label, value]) => (
+          <Box
+            key={label}
+            flexDirection="column"
+            borderStyle="round"
+            borderColor="subtle"
+            paddingX={1}
+          >
+            <Text dimColor>{label}</Text>
+            <Text bold>{value}</Text>
+          </Box>
+        ))}
+      </Box>
+      {top ? <Text dimColor>Top spender: {top}</Text> : null}
+    </Box>
+  );
+}
+
 function record(id: string, tool: string, input: Record<string, unknown>, now: number) {
   const h = live.history;
   const c = h.counters[id] ?? { calls: 0 };
@@ -567,6 +638,40 @@ function record(id: string, tool: string, input: Record<string, unknown>, now: n
   const file = editedFile(tool, input);
   if (file && !(h.edited[id] ?? []).includes(file)) {
     h.edited[id] = [...(h.edited[id] ?? []), file];
+  }
+}
+
+const ignore = () => {};
+const AGENT_CAP = 200;
+
+/** Fire-and-forget refresh; a failed one is retried by the next event or tick. */
+function kick($: EngineInterface) {
+  refresh($).catch(ignore);
+}
+
+/** Keeps a long session's saved history small by forgetting the oldest finished agents past AGENT_CAP. */
+function prune(h: OrchestraHistory) {
+  const ids = Object.keys(h.agents);
+  const finished = ids
+    .filter((id) => h.agents[id]?.status === "done" || h.agents[id]?.status === "fail")
+    .sort((a, b) => (h.endedAt[a] ?? 0) - (h.endedAt[b] ?? 0));
+  for (const id of finished.slice(0, Math.max(0, ids.length - AGENT_CAP))) {
+    delete h.agents[id];
+    for (const map of [
+      h.models,
+      h.startedAt,
+      h.endedAt,
+      h.results,
+      h.tasks,
+      h.actions,
+      h.edited,
+      h.seen,
+      h.costs,
+      h.tokens,
+      h.counters,
+    ]) {
+      delete map[id];
+    }
   }
 }
 
@@ -603,6 +708,7 @@ async function snapshot($: EngineInterface): Promise<OrchestraGraph> {
   const now = await $.clock.now();
   const agents = await $.agent.list();
   const h = live.history;
+  prune(h);
   const details = (id: string) => ({
     ...(h.counters[id] ?? { calls: 0 }),
     task: h.tasks[id],
@@ -678,6 +784,10 @@ async function refresh($: EngineInterface): Promise<OrchestraGraph | undefined> 
     return undefined;
   }
   const graph = await snapshot($);
+  // Turned off while the snapshot was being taken.
+  if (!live.isOn) {
+    return undefined;
+  }
   // Agents only, as the band's jump is: the main loop's own prompt is already in front of the person.
   const waiting = graph.nodes.filter((n) => n.kind === "agent" && n.status === "wait");
   if (waiting.length !== live.waitCount) {
@@ -718,7 +828,9 @@ async function svgSource(
   isPaused: boolean,
 ): Promise<string> {
   const now = await $.clock.now();
-  const key = `${signatures(graph).coarse}|${isFoldOpen}|${isPaused}`;
+  // Context in tenths, so the tile's figure updates now and then without a reload per turn.
+  const ctxTenth = Math.floor((graph.ctxPercent ?? 0) / 10);
+  const key = `${signatures(graph).coarse}|${isFoldOpen}|${isPaused}|${ctxTenth}`;
   let cached = live.svg;
   if (!cached || cached.key !== key || now - cached.at >= SVG_REFRESH_MS) {
     cached = {
@@ -779,8 +891,8 @@ async function tick($: EngineInterface) {
 
 function startTicking($: EngineInterface) {
   live.timer?.cancel();
-  live.timer = $.clock.every(TICK_MS, () => void tick($));
-  void refresh($);
+  live.timer = $.clock.every(TICK_MS, () => tick($).catch(ignore));
+  kick($);
 }
 
 async function setOn($: EngineInterface, value: boolean) {

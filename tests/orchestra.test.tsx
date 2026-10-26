@@ -17,6 +17,7 @@ import {
   summarize,
   TILE_H,
   TILE_W,
+  stats,
   totals,
 } from "../hooks/graph";
 import type { OrchestraGraph, OrchestraHistory, OrchestraNode } from "../types";
@@ -209,6 +210,19 @@ test("summary and totals count the whole session", () => {
   expect(totals(graph)).toBe(
     "2 agents · 1 running · 1 failed · 8 calls · $1.50 · waited on you 1m02",
   );
+  expect(stats(graph)).toEqual({
+    counts: [
+      ["run", 1],
+      ["fail", 1],
+    ],
+    tiles: [
+      ["Agents", "2"],
+      ["Calls", "8"],
+      ["Cost", "$1.50"],
+      ["Waited on you", "1m02"],
+    ],
+    top: undefined,
+  });
 });
 
 test("on the terminal each agent is a tile whose title opens its conversation", async ($, on) => {
@@ -267,7 +281,7 @@ test("the svg fits the pane width and keeps its proportions", async ($, on) => {
   await narrow.unmount();
 });
 
-test("finished agents fold past six; /orchestra all unfolds them", async ($, on) => {
+test("finished agents show by default; /orchestra all folds them past six", async ($, on) => {
   const clock = mock.clock(on);
   const many: AgentInfo[] = Array.from({ length: 7 }, (_, i) => ({
     id: `d${i}`,
@@ -279,16 +293,16 @@ test("finished agents fold past six; /orchestra all unfolds them", async ($, on)
   await $.session.start({ cwd: "/", surface: "terminal", isInteractive: true });
   await clock.advance(1100);
 
-  const pane = await $.ui.mount({ ...PANE, surface: "terminal" });
-  expect(await pane.find({ type: "Box", key: "tile-d0" })).toBeUndefined();
-  expect((await pane.find({ type: "Text", text: /7 finished agents/ }))?.text).toContain("show");
-  expect((await run($, "all")).text).toBe("Showing every finished agent.");
-  expect(await pane.find({ type: "Box", key: "tile-d0" })).toBeDefined();
-  await pane.unmount();
-
   const desktop = await $.ui.mount({ ...PANE, surface: "desktop" });
   expect(String((await desktop.find({ type: "Svg" }))?.props.source)).toContain("done 6");
   await desktop.unmount();
+
+  const pane = await $.ui.mount({ ...PANE, surface: "terminal" });
+  expect(await pane.find({ type: "Box", key: "tile-d0" })).toBeDefined();
+  expect((await run($, "all")).text).toBe("Folding finished agents again.");
+  expect(await pane.find({ type: "Box", key: "tile-d0" })).toBeUndefined();
+  expect((await pane.find({ type: "Text", text: /7 finished agents/ }))?.text).toContain("show");
+  await pane.unmount();
 });
 
 test("the band offers a jump to the agent waiting on you", async ($, on) => {

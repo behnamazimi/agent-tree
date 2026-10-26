@@ -52,7 +52,7 @@ text{font-family:ui-sans-serif,system-ui,-apple-system,sans-serif}
 .tint{pointer-events:none}
 .card.wait rect.bg{stroke:${HEX.wait};stroke-width:1.5}
 .card.fail rect.bg{stroke:${HEX.fail};stroke-width:1.5}
-.card.done{opacity:.6}
+.card.done{opacity:.8}
 .k{font-size:10.5px;fill:var(--faint)}
 .t{font-size:13.5px;font-weight:600;fill:var(--text)}
 .m{font-size:11px;fill:var(--muted)}

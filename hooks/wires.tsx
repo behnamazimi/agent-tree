@@ -22,7 +22,7 @@ const Wires: ClientModule<WiresProps, number> = (props, surface) => {
         const isPulse = phase >= 0 && w.step !== undefined && (w.step - phase) % PULSE_EVERY === 0;
 
         return (
-          <Box position="absolute" top={w.y} left={w.x}>
+          <Box key={`${w.x},${w.y}`} position="absolute" top={w.y} left={w.x}>
             <Text color={w.color} dimColor={w.dim} bold={isPulse}>
               {isPulse ? "•" : w.ch}
             </Text>
