@@ -4,6 +4,9 @@ export const FOLD_AFTER = 6
 const REPEAT_FLAG = 4
 const SLOW_FACTOR = 2
 const SLOW_MIN_MS = 60_000
+const STUCK_MS = 180_000
+const COST_FACTOR = 3
+const COST_MIN_USD = 0.25
 
 /** Theme keys, so both surfaces draw them in the person's light or dark theme. */
 export const STATUS_COLOR: Record<OrchestraStatus, string> = {
@@ -104,10 +107,20 @@ export function fold(kids: OrchestraNode[], isOpen: boolean): { shown: Orchestra
 /** Short warnings worth a glance; empty when the node looks normal. */
 export function flags(n: OrchestraNode, graph: OrchestraGraph, now: number): string[] {
   const out: string[] = []
+  const siblings = graph.nodes.filter(o => o !== n && o.parentId === n.parentId && o.kind === 'agent')
+  // The tile clips this line at its end, so the most urgent flags come first.
+  // An agent with no call yet has no lastAt: it may still be on its first model request.
+  // Agents only: the main loop may think for minutes between calls.
+  if (n.kind === 'agent' && n.status === 'run' && n.lastAt !== undefined && now - n.lastAt > STUCK_MS) {
+    out.push(`quiet ${age(n.lastAt, now)}`)
+  }
+  const siblingCost = median(siblings.map(o => o.costUsd ?? 0).filter(c => c > 0))
+  if (n.status === 'run' && siblingCost !== undefined && (n.costUsd ?? 0) >= COST_MIN_USD && (n.costUsd ?? 0) > siblingCost * COST_FACTOR) {
+    out.push(`cost ${Math.round((n.costUsd ?? 0) / siblingCost)}×`)
+  }
   if (n.repeat && n.repeat.count >= REPEAT_FLAG) {
     out.push(`same ${n.repeat.action.split(' ')[0]} ×${n.repeat.count}`)
   }
-  const siblings = graph.nodes.filter(o => o !== n && o.parentId === n.parentId && o.kind === 'agent')
   const durations = siblings.filter(o => o.endedAt !== undefined).map(o => (o.endedAt ?? 0) - o.startedAt)
   const mine = (n.endedAt ?? now) - n.startedAt
   const typical = median(durations)
@@ -190,6 +203,8 @@ export function totals(graph: OrchestraGraph): string {
   const agents = graph.nodes.filter(n => n.kind !== 'main')
   const by = (s: OrchestraStatus) => agents.filter(n => n.status === s).length
   const calls = graph.nodes.reduce((sum, n) => sum + n.calls, 0)
+  const priced = agents.filter(n => (n.costUsd ?? 0) > 0).sort((a, b) => (b.costUsd ?? 0) - (a.costUsd ?? 0))
+  const top = priced.length >= 2 && graph.costUsd ? priced[0] : undefined
   const parts = [
     plural(agents.length, 'agent'),
     by('wait') ? `${by('wait')} need you` : undefined,
@@ -199,10 +214,31 @@ export function totals(graph: OrchestraGraph): string {
     by('fail') ? `${by('fail')} failed` : undefined,
     plural(calls, 'call'),
     graph.costUsd === undefined ? undefined : `$${graph.costUsd.toFixed(2)}`,
+    top && graph.costUsd ? `top ${clip(top.label, 16)} ${Math.round(((top.costUsd ?? 0) / graph.costUsd) * 100)}%` : undefined,
     graph.waitMs ? `waited on you ${age(0, graph.waitMs)}` : undefined,
   ]
 
   return parts.filter(Boolean).join(' · ')
+}
+
+/** The graph as a markdown outline, children under their parent, for pasting into a PR or chat. */
+export function outline(graph: OrchestraGraph): string {
+  const kids = childrenOf(graph.nodes)
+  const lines: string[] = []
+  const visit = (n: OrchestraNode, depth: number) => {
+    const detail = [n.status, n.model?.replace(/^claude-/, ''), plural(n.calls, 'call'), spend(n), age(n.startedAt, n.endedAt ?? graph.now)]
+      .filter(Boolean)
+      .join(', ')
+    lines.push(`${'  '.repeat(depth)}- **${n.label}** (${detail})${n.result ? `: ${n.result}` : ''}`)
+    for (const k of kids.get(n.id) ?? []) {
+      visit(k, depth + 1)
+    }
+  }
+  for (const root of kids.get(null) ?? []) {
+    visit(root, 0)
+  }
+
+  return lines.join('\n')
 }
 
 export function plural(count: number, noun: string): string {

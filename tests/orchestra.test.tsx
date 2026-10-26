@@ -3,7 +3,7 @@ import type { TestBody } from 'claude-code/testing'
 import type { AgentInfo, On } from 'claude-code'
 
 import { renderGraphSvg } from '../hooks/svg'
-import { attributeCost, describeAction, editedFile, flags, fold, layoutTree, meta, note, spend, summarize, TILE_H, TILE_W, totals } from '../hooks/graph'
+import { attributeCost, describeAction, editedFile, flags, fold, layoutTree, meta, note, outline, spend, summarize, TILE_H, TILE_W, totals } from '../hooks/graph'
 import type { OrchestraGraph, OrchestraHistory, OrchestraNode } from '../types'
 
 const node = (id: string, parentId: string | null, status: OrchestraNode['status'], extra: Partial<OrchestraNode> = {}): OrchestraNode => ({
@@ -88,6 +88,33 @@ test('flags call out repeats, slow runs and files two agents edited', () => {
   expect(flags(graph.nodes[1] as OrchestraNode, graph, 120_000)).toEqual([])
 })
 
+test('flags call out a quiet run and a cost far above its siblings', () => {
+  const graph: OrchestraGraph = {
+    nodes: [
+      node('main', null, 'run'),
+      node('a', 'main', 'run', { lastAt: 0, costUsd: 1.5 }),
+      node('b', 'main', 'done', { costUsd: 0.2 }),
+      node('c', 'main', 'done', { costUsd: 0.3 }),
+    ],
+    now: 0,
+  }
+  expect(flags(graph.nodes[1] as OrchestraNode, graph, 200_000)).toEqual(['quiet 3m20', 'cost 6×'])
+})
+
+test('totals names the top spender, and outline nests children under parents', () => {
+  const graph: OrchestraGraph = {
+    nodes: [node('main', null, 'run'), node('a', 'main', 'run', { costUsd: 0.9 }), node('b', 'main', 'run', { costUsd: 0.3 })],
+    costUsd: 1.5,
+    now: 0,
+  }
+  expect(totals(graph)).toContain('top a 60%')
+  const tree: OrchestraGraph = {
+    nodes: [node('main', null, 'run'), node('a', 'main', 'done', { calls: 2, endedAt: 30_000, result: 'Found 3' })],
+    now: 60_000,
+  }
+  expect(outline(tree)).toBe('- **main** (run, 0 calls, 1m00)\n  - **a** (done, 2 calls, 30s): Found 3')
+})
+
 test('past six finished children the finished ones fold, unless opened', () => {
   const kids = [node('r', 'main', 'run'), ...Array.from({ length: 7 }, (_, i) => node(`d${i}`, 'main', 'done'))]
   expect(fold(kids, false).shown.map(n => n.id)).toEqual(['r'])
@@ -135,8 +162,8 @@ test('on the desktop the view is one interactive svg with hover cards and a time
   engine(on)
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   await $.tool.call({ tool: 'Bash', command: 'ls -la', agentId: 'a2' })
-  // A new current action is a fine change: it reaches the drawing within ten seconds.
-  await clock.advance(11_000)
+  // A new current action is a fine change: the svg takes it up at its five-minute refresh.
+  await clock.advance(301_000)
 
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
   const svg = await pane.find({ type: 'Svg' })
@@ -236,8 +263,86 @@ test('/orchestra answers on, off, view, open and bad input', async ($, on) => {
   expect((await run($, 'open a2')).text).toBe('Showing Search the repo.')
   expect((await run($, 'open main')).text).toBe('Showing this session.')
   expect((await run($, 'open nobody')).text).toBe('No agent matches "nobody". Hover a card to see its id.')
-  expect((await run($, 'nope')).text).toBe('Usage: /orchestra on|off|view|all|open <agent>')
+  expect((await run($, 'nope')).text).toBe('Usage: /orchestra on|off|view|all|open <agent>|export')
   expect(viewed).toEqual([{ agentId: 'a3' }, { agentId: 'a2' }, {}])
+})
+
+test('an agent that starts waiting on you raises one toast and a status line, cleared once answered', async ($, on) => {
+  const clock = mock.clock(on)
+  engine(on)
+  const toasts: string[] = []
+  const statuses: (string | undefined)[] = []
+  on('ui.toast', (_, e, next) => {
+    toasts.push(e.text)
+
+    return next(e)
+  })
+  on('ui.status', (_, e, next) => {
+    statuses.push(e.text)
+
+    return next(e)
+  })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await clock.advance(1100)
+  expect(toasts).toEqual([])
+
+  await askFromA3($)
+  await clock.advance(2100)
+  expect(toasts).toEqual(['Nested scan needs you'])
+  expect(statuses.at(-1)).toBe('1 need you')
+
+  await $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'a3' })
+  await clock.advance(2100)
+  expect(toasts).toHaveLength(1)
+  expect(statuses.at(-1)).toBeUndefined()
+})
+
+test('/orchestra export copies an outline with nested agents indented', async ($, on) => {
+  const clock = mock.clock(on)
+  engine(on)
+  const copied: string[] = []
+  on('ui.copy', (_, e) => {
+    copied.push(e.text)
+
+    return { value: { isCopied: true } }
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(1100)
+
+  expect((await run($, 'export')).text).toBe('Orchestra outline copied.')
+  expect(copied[0]).toContain('- **this session**')
+  expect(copied[0]).toContain('  - **Search the repo**')
+  expect(copied[0]).toContain('    - **Nested scan**')
+})
+
+test('animations resume at the same phase after a redraw', () => {
+  const graph: OrchestraGraph = { nodes: [node('main', null, 'run'), node('a', 'main', 'run')], now: 0 }
+  const begins = (phase: number) => renderGraphSvg(graph, { isPaused: false, isFoldOpen: false, now: 0, phase }).match(/begin="[^"]+"/g)
+  expect(begins(0)).not.toBeNull()
+  // A running wire's particle period is 1.4s: one period later it is where it was.
+  expect(begins(1400)).toEqual(begins(0))
+  expect(begins(500)).not.toEqual(begins(0))
+})
+
+test('the svg keeps its source through count changes and reloads on a status change', async ($, on) => {
+  const clock = mock.clock(on)
+  const agents: AgentInfo[] = [{ id: 'a1', description: 'Work', type: 'Explore', status: 'running' }]
+  engine(on, agents)
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await clock.advance(1100)
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const source = async () => String((await pane.find({ type: 'Svg' }))?.props.source)
+  const first = await source()
+
+  // Calls and a new action reach the graph within ten seconds, but not the frame.
+  await $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'a1' })
+  await clock.advance(40_000)
+  expect(await source()).toBe(first)
+
+  agents[0] = { ...agents[0]!, status: 'completed' }
+  await clock.advance(2000)
+  expect(await source()).not.toBe(first)
+  await pane.unmount()
 })
 
 test('counts redraw at most every ten seconds; a status change redraws at once', async ($, on) => {
@@ -366,7 +471,7 @@ test('a held agent waits on its own work, and only a named prompt means you', as
 test('wires start their particles mid-path and end in a level, fixed-size arrow', () => {
   const graph: OrchestraGraph = { nodes: [node('main', null, 'run'), node('a', 'main', 'wait')], now: 0 }
   const svg = renderGraphSvg(graph, { isPaused: false, isFoldOpen: false, now: 0 })
-  expect(svg).toContain('begin="-1.3s"')
+  expect(svg).toContain('begin="-1.300s"')
   expect(svg).not.toMatch(/begin="[1-9]/)
   expect(svg).toContain('markerUnits="userSpaceOnUse"')
   const lead = /<path d="M(\d+) (\d+) L(\d+) (\d+)"[^>]*marker-end/.exec(svg)

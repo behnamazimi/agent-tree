@@ -15,6 +15,7 @@ import {
   layoutTree,
   meta,
   note,
+  outline,
   plural,
   STATUS_COLOR,
   statusColor,
@@ -35,6 +36,8 @@ const CARD_W = 46
 // Measured from a desktop pane: about 10.6px per cell; a little under keeps the drawing inside.
 const PX_PER_COLUMN = 10
 const FINE_REDRAW_MS = 10_000
+// Each new SVG source reloads its frame, which shows as a blink; between events it is only refreshed this often.
+const SVG_REFRESH_MS = 300_000
 const CARD_ROOM = 9
 const SEEN_CAP = 50
 
@@ -80,6 +83,8 @@ const emptyHistory = (now: number): OrchestraHistory => ({
 // The hot path reads module state; refresh() saves `history` to $.state and session.start loads it back.
 const live = {
   isOn: true,
+  /** How many nodes waited on the person at the last refresh; the status and toast fire on its changes. */
+  waitCount: 0,
   timer: undefined as Timer | undefined,
   mainStatus: 'idle' as OrchestraStatus,
   waitingSince: undefined as number | undefined,
@@ -89,6 +94,8 @@ const live = {
   /** Agents whose permission prompt is up, with its message; cleared once their call goes through. */
   needsYou: {} as Record<string, string>,
   fineSig: '',
+  /** The desktop pane's last SVG, reused while its key (shape and status) holds. */
+  svg: undefined as { key: string; at: number; source: string } | undefined,
   lastWriteAt: 0,
   history: emptyHistory(0),
 }
@@ -97,8 +104,8 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'orchestra',
-      description: 'Orchestra view for this session: on, off, view, all (unfold), or open <agent> to jump into one',
-      argumentHint: 'on|off|view|all|open <agent>',
+      description: 'Orchestra view for this session: on, off, view, all (unfold), open <agent>, or export (copy an outline)',
+      argumentHint: 'on|off|view|all|open <agent>|export',
     })
     // A history saved by an older version lacks the newer fields; the empty one fills them.
     live.history = { ...emptyHistory(await $.clock.now()), ...(await read($, historyAtom)) }
@@ -136,8 +143,13 @@ export const register: Register = on => {
 
       return { text: moved.deny ? `Could not open it: ${moved.deny}` : `Showing ${target.label}.` }
     }
+    if (arg === 'export') {
+      const copied = await $.ui.copy({ text: outline(await read($, graphAtom)) })
+
+      return { text: copied.isCopied ? 'Orchestra outline copied.' : `Could not copy (${copied.reason}).` }
+    }
     if (arg !== '' && arg !== 'view') {
-      return { text: 'Usage: /orchestra on|off|view|all|open <agent>' }
+      return { text: 'Usage: /orchestra on|off|view|all|open <agent>|export' }
     }
     const opened = await $.ui.open({ id: PANE, title: 'Orchestra' })
 
@@ -320,7 +332,7 @@ export const register: Register = on => {
         <Box flexDirection="column" gap={1}>
           <Text dimColor>{header}</Text>
           <Svg
-            source={renderGraphSvg(graph, { isPaused: !isEnabled, isFoldOpen, now: graph.now })}
+            source={await svgSource($, graph, isFoldOpen, !isEnabled)}
             width={Math.round(natural.width * scale)}
             height={Math.round(natural.height * scale)}
             alt={`Orchestra: ${header}`}
@@ -593,6 +605,15 @@ async function refresh($: EngineInterface): Promise<OrchestraGraph | undefined> 
     return undefined
   }
   const graph = await snapshot($)
+  // Agents only, as the band's jump is: the main loop's own prompt is already in front of the person.
+  const waiting = graph.nodes.filter(n => n.kind === 'agent' && n.status === 'wait')
+  if (waiting.length !== live.waitCount) {
+    if (live.waitCount === 0 && waiting[0]) {
+      $.ui.toast(`${clip(waiting[0].label, 40)} needs you`)
+    }
+    $.ui.status(waiting.length ? `${waiting.length} need you` : undefined)
+    live.waitCount = waiting.length
+  }
   const { coarse, fine } = signatures(graph)
   const isCoarse = coarse !== live.coarseSig
   // Structure and status redraw at once; counts and current actions at most every FINE_REDRAW_MS,
@@ -609,9 +630,26 @@ async function refresh($: EngineInterface): Promise<OrchestraGraph | undefined> 
   return graph
 }
 
+/**
+ * The desktop pane's SVG. The last one is reused until the graph changes in shape or status, or the refresh is due,
+ * so the frame is not reloaded for every count or age; those go stale in it meanwhile (the header text stays live).
+ */
+async function svgSource($: EngineInterface, graph: OrchestraGraph, isFoldOpen: boolean, isPaused: boolean): Promise<string> {
+  const now = await $.clock.now()
+  const key = `${signatures(graph).coarse}|${isFoldOpen}|${isPaused}`
+  let cached = live.svg
+  if (!cached || cached.key !== key || now - cached.at >= SVG_REFRESH_MS) {
+    cached = { key, at: now, source: renderGraphSvg(graph, { isPaused, isFoldOpen, now: graph.now, phase: now }) }
+    live.svg = cached
+  }
+
+  return cached.source
+}
+
 /** What changes the drawing's shape (coarse) and what only changes its numbers and lines (fine). */
 function signatures(graph: OrchestraGraph): { coarse: string; fine: string } {
-  const coarse = graph.nodes.map(n => [n.id, n.parentId, n.status, n.label, n.result, n.edited?.length, (n.repeat?.count ?? 0) >= 4])
+  // The flag count, so a flag that turns on with time alone (a quiet agent makes no calls) still redraws.
+  const coarse = graph.nodes.map(n => [n.id, n.parentId, n.status, n.label, n.result, n.edited?.length, (n.repeat?.count ?? 0) >= 4, flags(n, graph, graph.now).length])
   const fine = graph.nodes.map(n => [n.id, n.calls, n.action, n.model, n.costUsd, n.tokens])
 
   return {
@@ -655,5 +693,7 @@ async function setOn($: EngineInterface, value: boolean) {
   } else {
     live.timer?.cancel()
     live.timer = undefined
+    $.ui.status(undefined)
+    live.waitCount = 0
   }
 }

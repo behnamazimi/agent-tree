@@ -64,6 +64,8 @@ text{font-family:ui-sans-serif,system-ui,-apple-system,sans-serif}
 .grid{stroke:var(--track);stroke-width:1}
 .tl.in{fill:#fff;font-weight:600}
 .bar.live{animation:breathe 1.6s ease-in-out infinite}
+/* A redraw reloads the frame; the wall-clock phase (--p, seconds) lets each animation resume where it was. */
+.flow,.ring,.bar.live{animation-delay:calc(var(--p)*-1s)}
 .paused .flow,.paused .ring,.paused .bar.live{animation:none}
 .paused .wire,.paused .card{opacity:.45}
 @keyframes dash{to{stroke-dashoffset:-20}}
@@ -88,7 +90,7 @@ export function svgSize(graph: OrchestraGraph, isFoldOpen: boolean): { width: nu
  * hover cards and a timeline. Hover is CSS (`#c-i:hover ~ #p-i`), so it needs
  * the Svg's interactive frame; the frame runs no script, so nothing here clicks.
  */
-export function renderGraphSvg(graph: OrchestraGraph, opts: { isPaused: boolean; isFoldOpen: boolean; now: number }): string {
+export function renderGraphSvg(graph: OrchestraGraph, opts: { isPaused: boolean; isFoldOpen: boolean; now: number; phase?: number }): string {
   const tree = layoutTree(graph, opts.isFoldOpen, DIMS)
   const { width, height } = svgSize(graph, opts.isFoldOpen)
   const shift = (t: { x: number; y: number }) => ({ x: t.x + PAD, y: t.y + PAD })
@@ -97,6 +99,8 @@ export function renderGraphSvg(graph: OrchestraGraph, opts: { isPaused: boolean;
   const finished = graph.nodes.filter(n => n.status === 'done')
   const hoverRules = [...tiles.map((_, i) => `#c${i}:hover~#p${i},#p${i}:hover`), ...folds.map((_, i) => `#f${i}:hover~#q${i},#q${i}:hover`)]
   const chartBottom = tree.height + 2 * PAD
+  // Wall-clock seconds the animations are aligned to, apart from `now`, which only labels ages.
+  const phase = (opts.phase ?? opts.now) / 1000
 
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">`,
@@ -106,9 +110,9 @@ export function renderGraphSvg(graph: OrchestraGraph, opts: { isPaused: boolean;
       .join('')}${Object.entries({ ...HEX, main: HEX.idle })
       .map(([s, c]) => `<linearGradient id="t-${s}" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="${c}" stop-opacity="${TINT[s] ?? 0.1}"/><stop offset=".7" stop-color="${c}" stop-opacity="0"/></linearGradient>`)
       .join('')}</defs>`,
-    `<style>${STYLE}${hoverRules.length ? `${hoverRules.join(',')}{opacity:1;visibility:visible}` : ''}</style>`,
+    `<style>${STYLE}:root{--p:${phase.toFixed(3)}}${hoverRules.length ? `${hoverRules.join(',')}{opacity:1;visibility:visible}` : ''}</style>`,
     `<g class="${opts.isPaused ? 'paused' : ''}">`,
-    ...tree.edges.map((e, i) => wire(e, i)),
+    ...tree.edges.map((e, i) => wire(e, i, phase)),
     ...tiles.map((t, i) => card(t, i, graph, opts.now)),
     ...folds.map((f, i) => foldBox(f, i)),
     timeline(graph, timelineRows(graph, tree.tiles), chartBottom, width, opts.now),
@@ -119,7 +123,7 @@ export function renderGraphSvg(graph: OrchestraGraph, opts: { isPaused: boolean;
   ].join('')
 }
 
-function wire({ from, to }: TreeEdge, i: number): string {
+function wire({ from, to }: TreeEdge, i: number, phase: number): string {
   const x1 = from.x + PAD + CARD_W
   const y1 = from.y + PAD + from.h / 2
   const x2 = to.x + PAD - 1
@@ -139,10 +143,13 @@ function wire({ from, to }: TreeEdge, i: number): string {
     return path
   }
   const dur = to.status === 'run' ? 1.4 : 2.6
-  // A negative begin starts the particle mid-path; a positive one leaves it at the origin until then.
-  const dot = (begin: number) =>
+  // A negative begin starts the particle mid-path, here at the wall-clock phase so a reload does not restart it.
+  const dot = (offset: number) => {
+    const begin = `-${((phase + offset) % dur).toFixed(3)}s`
+
     // Fades in off the source card and out before the arrowhead, so it never sits on the tip.
-    `<circle r="3" fill="${color}" opacity="0"><animateMotion dur="${dur}s" begin="${-begin}s" repeatCount="indefinite" keyPoints="0;1" keyTimes="0;1" calcMode="spline" keySplines=".4 0 .6 1"><mpath href="#w${i}"/></animateMotion><animate attributeName="opacity" values="0;1;1;0" keyTimes="0;.12;.8;.92" dur="${dur}s" begin="${-begin}s" repeatCount="indefinite"/></circle>`
+    return `<circle r="3" fill="${color}" opacity="0"><animateMotion dur="${dur}s" begin="${begin}" repeatCount="indefinite" keyPoints="0;1" keyTimes="0;1" calcMode="spline" keySplines=".4 0 .6 1"><mpath href="#w${i}"/></animateMotion><animate attributeName="opacity" values="0;1;1;0" keyTimes="0;.12;.8;.92" dur="${dur}s" begin="${begin}" repeatCount="indefinite"/></circle>`
+  }
 
   return `<g class="wire">${path}${dot(0)}${dot(dur / 2)}</g>`
 }
