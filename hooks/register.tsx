@@ -12,6 +12,7 @@ import {
   flags,
   FOLD_AFTER,
   FOLD_H,
+  headline,
   layoutTree,
   meta,
   note,
@@ -25,7 +26,7 @@ import {
   totals,
 } from "./graph";
 import type { PlacedFold, PlacedTile } from "./graph";
-import { renderGraphSvg, svgSize } from "./svg";
+import { renderBarSvg, renderGraphSvg, svgSize } from "./svg";
 import type { WiresProps } from "./wires";
 
 const PANE = "orchestra";
@@ -368,11 +369,84 @@ export const register: Register = (on) => {
         copied.isCopied ? "Orchestra overview copied" : `Could not copy (${copied.reason})`,
       );
     };
-    // The button comes first, so a long totals line can only clip itself, never push it away.
+    const head = headline(graph);
+    const figures = [
+      ...head.figures,
+      head.top ? (
+        <Text key="top">
+          top{" "}
+          <Text dimColor={false} weight="semibold">
+            {head.top.label}
+          </Text>{" "}
+          {head.top.share}
+        </Text>
+      ) : undefined,
+      head.waited,
+    ].filter(Boolean);
+    const total = head.counts.reduce((sum, [, count]) => sum + count, 0);
+    // The terminal draws a line of ━ split by status; a desktop a thin rounded SVG track.
+    const barCols = Math.max(10, e.props.bodyColumns - 4);
+    let bar;
+    if (e.surface === "terminal") {
+      let drawn = 0;
+      bar = (
+        <Text>
+          {total ? (
+            head.counts.map(([status, count]) => {
+              // Rounded at each running edge, so the segments always fill the line exactly.
+              const cols =
+                Math.round(((drawn + count) / total) * barCols) -
+                Math.round((drawn / total) * barCols);
+              drawn += count;
+
+              return (
+                <Text key={status} color={STATUS_COLOR[status]}>
+                  {"━".repeat(cols)}
+                </Text>
+              );
+            })
+          ) : (
+            <Text dimColor>{"━".repeat(barCols)}</Text>
+          )}
+        </Text>
+      );
+    } else {
+      const { Svg } = $.ui.resolve(e);
+      bar = (
+        <Svg
+          key="bar"
+          source={renderBarSvg(head.counts, e.props.bodyColumns * PX_PER_COLUMN)}
+          height={16}
+          alt={head.state || "no agents yet"}
+        />
+      );
+    }
+    // Rows touch: on the desktop the bar's SVG carries the space around it, finer than a row of cells.
+    // A card: count and state beside Copy, a bar split by status, then the session's figures.
     const headerRow = (
-      <Box flexDirection="row" gap={1}>
-        <Button key="copy" label="Copy" onPress={() => void copy()} />
-        <Text dimColor>{header}</Text>
+      <Box
+        flexDirection="column"
+        borderStyle="round"
+        borderColor="subtle"
+        borderDimColor
+        paddingX="sm"
+        paddingY="sm"
+      >
+        <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
+          <Box flexDirection="row" gap={1} flexShrink={1}>
+            <Text size="heading" weight="semibold">
+              {head.agents}
+            </Text>
+            <Text dimColor>
+              {isEnabled
+                ? head.state || "no agents yet"
+                : "off for this session, no events recorded"}
+            </Text>
+          </Box>
+          <Button key="copy" label="Copy" onPress={() => void copy()} />
+        </Box>
+        {bar}
+        <Text dimColor>{figures.flatMap((f, i) => (i ? [" · ", f] : [f]))}</Text>
       </Box>
     );
 

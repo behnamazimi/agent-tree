@@ -14,6 +14,7 @@ import {
   note,
   outline,
   spend,
+  headline,
   summarize,
   TILE_H,
   TILE_W,
@@ -209,6 +210,9 @@ test("summary and totals count the whole session", () => {
   expect(totals(graph)).toBe(
     "2 agents · 1 running · 1 failed · 8 calls · $1.50 · waited on you 1m02",
   );
+  expect(headline(graph).state).toBe("1 running · 1 failed");
+  const done = { ...graph, nodes: graph.nodes.map((n) => ({ ...n, status: "done" as const })) };
+  expect(headline(done)).toMatchObject({ state: "all done", counts: [["done", 2]] });
 });
 
 test("on the terminal each agent is a tile whose title opens its conversation", async ($, on) => {
@@ -236,7 +240,7 @@ test("on the desktop the view is one interactive svg with hover cards and a time
   await clock.advance(301_000);
 
   const pane = await $.ui.mount({ ...PANE, surface: "desktop" });
-  const svg = await pane.find({ type: "Svg" });
+  const svg = (await pane.findAll({ type: "Svg" })).at(-1);
   const source = String(svg?.props.source);
   expect(svg?.props.isInteractive).toBe(true);
   expect(source).toContain("Search the repo");
@@ -259,7 +263,7 @@ test("the svg fits the pane width and keeps its proportions", async ($, on) => {
     surface: "desktop",
     props: { ...PANE.props, bodyColumns: 40 },
   });
-  const svg = await narrow.find({ type: "Svg" });
+  const svg = (await narrow.findAll({ type: "Svg" })).at(-1);
   expect(svg?.props.width).toBe(400);
   const natural = /viewBox="0 0 (\d+) (\d+)"/.exec(String(svg?.props.source));
   const ratio = Number(natural?.[2]) / Number(natural?.[1]);
@@ -280,7 +284,7 @@ test("finished agents show by default; /orchestra all folds them past six", asyn
   await clock.advance(1100);
 
   const desktop = await $.ui.mount({ ...PANE, surface: "desktop" });
-  expect(String((await desktop.find({ type: "Svg" }))?.props.source)).toContain("done 6");
+  expect(String((await desktop.findAll({ type: "Svg" })).at(-1)?.props.source)).toContain("done 6");
   await desktop.unmount();
 
   const pane = await $.ui.mount({ ...PANE, surface: "terminal" });
@@ -325,9 +329,10 @@ test("the band switch turns orchestra off for the session and the pane says so",
   await band.unmount();
 
   const pane = await $.ui.mount({ ...PANE, surface: "desktop" });
-  expect((await pane.find({ type: "Text", text: /Off for this session/ }))?.text).toContain(
-    "3 agents",
+  expect((await pane.find({ type: "Text", text: /off for this session/ }))?.text).toContain(
+    "no events recorded",
   );
+  expect((await pane.find({ type: "Text", text: /agents/ }))?.text).toBe("3 agents");
   await pane.unmount();
 });
 
@@ -452,7 +457,7 @@ test("the svg keeps its source through count changes and reloads on a status cha
   await $.session.start({ cwd: "/", surface: "desktop", isInteractive: true });
   await clock.advance(1100);
   const pane = await $.ui.mount({ ...PANE, surface: "desktop" });
-  const source = async () => String((await pane.find({ type: "Svg" }))?.props.source);
+  const source = async () => String((await pane.findAll({ type: "Svg" })).at(-1)?.props.source);
   const first = await source();
 
   // Calls and a new action reach the graph within ten seconds, but not the frame.
@@ -591,7 +596,7 @@ test("an agent the list drops when it ends stays on the graph as finished", asyn
   const pane = await $.ui.mount({ ...PANE, surface: "terminal" });
   expect(await pane.find({ type: "Box", key: "tile-a3" })).toBeDefined();
   const desktop = await $.ui.mount({ ...PANE, surface: "desktop" });
-  const source = String((await desktop.find({ type: "Svg" }))?.props.source);
+  const source = String((await desktop.findAll({ type: "Svg" })).at(-1)?.props.source);
   expect(source).toMatch(/class="card done"[^]*Nested scan/);
   await pane.unmount();
   await desktop.unmount();

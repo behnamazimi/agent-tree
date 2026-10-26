@@ -236,31 +236,65 @@ export function summarize(graph: OrchestraGraph): string {
   return parts.join(" · ");
 }
 
-/** One line of everything the session has done so far, for the pane's header. */
-export function totals(graph: OrchestraGraph): string {
+const STATUS_ORDER: OrchestraStatus[] = ["wait", "run", "hold", "idle", "done", "fail"];
+const STATUS_LABEL: Record<OrchestraStatus, string> = {
+  wait: "need you",
+  run: "running",
+  hold: "held",
+  idle: "idle",
+  done: "done",
+  fail: "failed",
+};
+
+/** The pane header's pieces: agent count, per-status counts, and the session's figures. */
+export function headline(graph: OrchestraGraph) {
   const agents = graph.nodes.filter((n) => n.kind !== "main");
-  const by = (s: OrchestraStatus) => agents.filter((n) => n.status === s).length;
+  const counts = STATUS_ORDER.map(
+    (s) => [s, agents.filter((n) => n.status === s).length] as const,
+  ).filter(([, count]) => count > 0);
   const calls = graph.nodes.reduce((sum, n) => sum + n.calls, 0);
   const priced = agents
     .filter((n) => (n.costUsd ?? 0) > 0)
     .sort((a, b) => (b.costUsd ?? 0) - (a.costUsd ?? 0));
   const top = priced.length >= 2 && graph.costUsd ? priced[0] : undefined;
-  const parts = [
-    plural(agents.length, "agent"),
-    by("wait") ? `${by("wait")} need you` : undefined,
-    by("run") ? `${by("run")} running` : undefined,
-    by("hold") ? `${by("hold")} held` : undefined,
-    by("done") ? `${by("done")} done` : undefined,
-    by("fail") ? `${by("fail")} failed` : undefined,
-    plural(calls, "call"),
-    graph.costUsd === undefined ? undefined : `$${graph.costUsd.toFixed(2)}`,
-    top && graph.costUsd
-      ? `top ${clip(top.label, 16)} ${Math.round(((top.costUsd ?? 0) / graph.costUsd) * 100)}%`
-      : undefined,
-    graph.waitMs ? `waited on you ${age(0, graph.waitMs)}` : undefined,
-  ];
+  // Idle agents are left out of the words; the bar still shows them.
+  const words = counts
+    .filter(([s]) => s !== "idle")
+    .map(([s, count]) => `${count} ${STATUS_LABEL[s]}`);
 
-  return parts.filter(Boolean).join(" · ");
+  return {
+    agents: plural(agents.length, "agent"),
+    counts,
+    words,
+    state: counts.length === 1 && counts[0]?.[0] === "done" ? "all done" : words.join(" · "),
+    figures: [
+      plural(calls, "call"),
+      graph.costUsd === undefined ? undefined : `$${graph.costUsd.toFixed(2)}`,
+    ].filter((p): p is string => Boolean(p)),
+    top:
+      top && graph.costUsd
+        ? {
+            label: clip(top.label, 16),
+            share: `${Math.round(((top.costUsd ?? 0) / graph.costUsd) * 100)}%`,
+          }
+        : undefined,
+    waited: graph.waitMs ? `waited on you ${age(0, graph.waitMs)}` : undefined,
+  };
+}
+
+/** One line of everything the session has done so far, for the clipboard and the pane's alt text. */
+export function totals(graph: OrchestraGraph): string {
+  const h = headline(graph);
+
+  return [
+    h.agents,
+    ...h.words,
+    ...h.figures,
+    h.top ? `top ${h.top.label} ${h.top.share}` : undefined,
+    h.waited,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 /** The graph as a markdown outline, children under their parent, for pasting into a PR or chat. */

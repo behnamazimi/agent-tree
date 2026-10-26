@@ -426,3 +426,24 @@ function timeline(
 function esc(text: string): string {
   return text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }
+
+/** The pane header's bar on the desktop: a thin rounded track split by status, stretched to its slot. */
+export function renderBarSvg(
+  counts: ReadonlyArray<readonly [OrchestraStatus, number]>,
+  width: number,
+): string {
+  // 6px bar with 6px above and 4px below: the space between the header's rows.
+  const y = 6;
+  const total = counts.reduce((sum, [, count]) => sum + count, 0);
+  let x = 0;
+  const segments = counts.map(([status, count]) => {
+    const w = (count / total) * width;
+    const rect = `<rect x="${x.toFixed(1)}" y="${y}" width="${w.toFixed(1)}" height="6" fill="${HEX[status]}"/>`;
+    x += w;
+
+    return rect;
+  });
+
+  // Drawn at the estimated slot width, so stretching it to the real one barely bends the rounded ends.
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="16" viewBox="0 0 ${width} 16" preserveAspectRatio="none"><style>.t{fill:#e4e2da}@media (prefers-color-scheme:dark){.t{fill:#3a3935}}</style><clipPath id="r"><rect y="${y}" width="${width}" height="6" rx="3"/></clipPath><rect class="t" y="${y}" width="${width}" height="6" rx="3"/><g clip-path="url(#r)">${segments.join("")}</g></svg>`;
+}
