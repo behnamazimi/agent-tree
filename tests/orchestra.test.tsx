@@ -225,7 +225,7 @@ test("on the terminal each agent is a tile whose title opens its conversation", 
   const pane = await $.ui.mount({ ...PANE, surface: "terminal" });
   expect(await pane.find({ type: "Box", key: "tile-a3" })).toBeDefined();
   expect((await pane.find({ type: "Text", text: /needs you/ }))?.props.color).toBe("warning");
-  expect((await pane.find({ type: "Client", key: "wires" }))?.props.module).toContain("wires");
+  expect((await pane.find({ type: "Client", key: "wires-client" }))?.props.module).toContain("wires");
   await pane.press({ key: "open-a2" });
   expect(viewed).toEqual([{ agentId: "a2" }]);
   await pane.unmount();
