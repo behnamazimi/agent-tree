@@ -75,8 +75,14 @@ const baseAgents: AgentInfo[] = [
   { id: "a3", description: "Nested scan", type: "Explore", status: "waiting", parentId: "a2" },
 ];
 
-function engine(on: On, agents: AgentInfo[] = baseAgents) {
+/** Stands for the engine; `beneath` is what another plugin's band under orchestra draws. */
+function engine(on: On, agents: AgentInfo[] = baseAgents, beneath = "") {
   const viewed: unknown[] = [];
+  on("ui.render", { component: "AbovePrompt" }, ($, e) => {
+    const { Box, Text } = $.ui.resolve(e);
+
+    return beneath ? <Text>{beneath}</Text> : <Box />;
+  });
   on("command.register", () => ({ value: { command: "orchestra" } }));
   on("ui.open", () => ({ value: { isPlaced: true } }));
   on("ui.view", (_, e) => {
@@ -313,6 +319,20 @@ test("the band offers a jump to the agent waiting on you", async ($, on) => {
   await band.press({ key: "jump" });
   expect(viewed).toEqual([{ agentId: "a3" }]);
   await band.unmount();
+});
+
+test("the band keeps the band another plugin draws beneath it", async ($, on) => {
+  const clock = mock.clock(on);
+  engine(on, baseAgents, "other plugin");
+  await $.session.start({ cwd: "/", surface: "desktop", isInteractive: true });
+  await clock.advance(1100);
+
+  for (const surface of SURFACES) {
+    const band = await $.ui.mount({ ...BAND, surface });
+    expect(await band.find({ key: "toggle" })).toBeDefined();
+    expect(await band.find({ type: "Text", text: "other plugin" })).toBeDefined();
+    await band.unmount();
+  }
 });
 
 test("the band switch turns orchestra off for the session and the pane says so", async ($, on) => {

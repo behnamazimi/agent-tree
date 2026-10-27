@@ -309,8 +309,10 @@ export const register: Register = (on) => {
   });
 
   on("ui.render", { component: "AbovePrompt" }, async ($, e, next) => {
+    // The band is one instance shared by every plugin: draw what the ones beneath drew under ours.
+    const beneath = await next(e);
     if (e.props.hasSurvey) {
-      return next(e);
+      return beneath;
     }
     const { Box, Button, Text } = $.ui.resolve(e);
     const isEnabled = await read($, isOnAtom);
@@ -320,7 +322,7 @@ export const register: Register = (on) => {
       ? graph.nodes.find((n) => n.kind === "agent" && n.status === "wait")
       : undefined;
 
-    return (
+    const row = (
       <Box flexDirection="row" gap={1}>
         <Text color={isEnabled ? statusColor(graph) : undefined} dimColor={!isEnabled}>
           ●
@@ -347,6 +349,13 @@ export const register: Register = (on) => {
           variant={isEnabled && !waiting ? "primary" : "secondary"}
           onPress={() => setOn($, !isEnabled)}
         />
+      </Box>
+    );
+
+    return (
+      <Box flexDirection="column" gap="xs">
+        {row}
+        {beneath}
       </Box>
     );
   });
