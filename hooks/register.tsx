@@ -639,7 +639,8 @@ export const register: Register = (on) => {
     const wireLayer = [
       <Box key="wires" position="absolute" top={0} left={0} width={tree.width} height={tree.height}>
         {tree.wires.map((w) => {
-          const isPulse = phase >= 0 && w.step !== undefined && (w.step - phase) % PULSE_EVERY === 0;
+          const isPulse =
+            phase >= 0 && w.step !== undefined && (w.step - phase) % PULSE_EVERY === 0;
 
           return (
             <Box key={`w${w.x},${w.y}`} position="absolute" top={w.y} left={w.x}>
@@ -906,7 +907,9 @@ async function refresh($: EngineInterface): Promise<OrchestraGraph | undefined> 
     if (live.storeKey) {
       await $.store
         .set(live.storeKey, live.history)
-        .catch((err: unknown) => $.ui.log(`orchestra: history not saved for a resume (${String(err)})`));
+        .catch((err: unknown) =>
+          $.ui.log(`orchestra: history not saved for a resume (${String(err)})`),
+        );
     }
   }
 
@@ -927,7 +930,9 @@ async function restoreHistory($: EngineInterface): Promise<OrchestraHistory | un
   try {
     const launches = (await $.store.keys())
       .filter((k) => k.startsWith(HISTORY_PREFIX) && k !== live.storeKey)
-      .sort((a, b) => Number(a.slice(HISTORY_PREFIX.length)) - Number(b.slice(HISTORY_PREFIX.length)));
+      .sort(
+        (a, b) => Number(a.slice(HISTORY_PREFIX.length)) - Number(b.slice(HISTORY_PREFIX.length)),
+      );
     for (const k of launches.slice(0, Math.max(0, launches.length - (HISTORIES_KEPT - 1)))) {
       await $.store.delete(k);
     }

@@ -401,7 +401,12 @@ const ANCHOR = 2;
 
 export type PlacedTile = { node: OrchestraNode; x: number; y: number };
 
-export type TimelineRow = { label: string; status: OrchestraStatus; startedAt: number; endedAt?: number };
+export type TimelineRow = {
+  label: string;
+  status: OrchestraStatus;
+  startedAt: number;
+  endedAt?: number;
+};
 
 /** One bar per drawn card, and one per fold spanning the agents folded into it. */
 export function timelineRows(graph: OrchestraGraph, tiles: PlacedTile[]): TimelineRow[] {

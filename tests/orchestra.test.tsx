@@ -717,7 +717,9 @@ test("a resumed conversation gets its history back from the store, and old ones 
   const store: Record<string, unknown> = {
     // session.usage's startedAt is 0 in this engine, so "history:0" is this conversation.
     "history:0": {
-      agents: { gone: { label: "Ran before the resume", type: "Explore", parentId: "main", status: "done" } },
+      agents: {
+        gone: { label: "Ran before the resume", type: "Explore", parentId: "main", status: "done" },
+      },
       results: { gone: "printed hello" },
     },
   };
@@ -741,7 +743,16 @@ test("a resumed conversation gets its history back from the store, and old ones 
   await band.unmount();
   // This conversation and the seven newest others are kept.
   expect(Object.keys(store).sort()).toEqual(
-    ["history:0", "history:4", "history:5", "history:6", "history:7", "history:8", "history:9", "history:10"].sort(),
+    [
+      "history:0",
+      "history:4",
+      "history:5",
+      "history:6",
+      "history:7",
+      "history:8",
+      "history:9",
+      "history:10",
+    ].sort(),
   );
 });
 
