@@ -1,4 +1,3 @@
-import { atom, read, update } from "claude-code";
 import type { AgentInfo, EngineInterface, Register, Timer } from "claude-code";
 
 import type { AgentTreeGraph, AgentTreeHistory, AgentTreeNode, AgentTreeStatus } from "../types";
@@ -52,20 +51,27 @@ const HISTORY_PREFIX = "history:";
 // Each history is capped by AGENT_CAP; a few fit well under the store's 4 MiB.
 const HISTORIES_KEPT = 8;
 
-const isOnAtom = atom({ plugin: "agent-tree", key: "isOn" } as const, true);
-const graphAtom = atom(
-  { plugin: "agent-tree", key: "graph" } as const,
-  {
-    nodes: [],
-    now: 0,
-  } as AgentTreeGraph,
-);
-const historyAtom = atom(
-  { plugin: "agent-tree", key: "history" } as const,
-  null as AgentTreeHistory | null,
-);
-const nowAtom = atom({ plugin: "agent-tree", key: "now" } as const, 0);
-const foldAtom = atom({ plugin: "agent-tree", key: "isFoldOpen" } as const, true);
+const isOnRef = { plugin: "agent-tree", key: "isOn" } as const;
+const graphRef = { plugin: "agent-tree", key: "graph" } as const;
+const historyRef = { plugin: "agent-tree", key: "history" } as const;
+const nowRef = { plugin: "agent-tree", key: "now" } as const;
+const foldRef = { plugin: "agent-tree", key: "isFoldOpen" } as const;
+
+async function readIsOn($: EngineInterface) {
+  return (await $.state.get(isOnRef)).value ?? true;
+}
+async function readGraph($: EngineInterface) {
+  return (await $.state.get(graphRef)).value ?? ({ nodes: [], now: 0 } as AgentTreeGraph);
+}
+async function readHistory($: EngineInterface) {
+  return (await $.state.get(historyRef)).value ?? null;
+}
+async function readNow($: EngineInterface) {
+  return (await $.state.get(nowRef)).value ?? 0;
+}
+async function readFold($: EngineInterface) {
+  return (await $.state.get(foldRef)).value ?? true;
+}
 
 const AGENT_STATUS: Record<AgentInfo["status"], AgentTreeStatus> = {
   pending: "run",
@@ -129,12 +135,12 @@ export const register: Register = (on) => {
     });
     live.storeKey = await historyKey($);
     // Session state lasts as long as the process; a resumed conversation finds its history in the store instead.
-    const saved = (await read($, historyAtom)) ?? (await restoreHistory($));
+    const saved = (await readHistory($)) ?? (await restoreHistory($));
     // A history saved by an older version lacks the newer fields; the empty one fills them.
     live.history = { ...emptyHistory(await $.clock.now()), ...saved };
     // Cost spent before the mod loaded belongs to no agent it saw.
     live.history.lastUsd = Math.max(live.history.lastUsd, (await sessionUsd($)) ?? 0);
-    live.isOn = await read($, isOnAtom);
+    live.isOn = await readIsOn($);
     if (live.isOn) {
       startTicking($);
     }
@@ -151,8 +157,8 @@ export const register: Register = (on) => {
       return { text: `Agent tree is ${arg} for this session.` };
     }
     if (arg === "all") {
-      const isOpen = !(await read($, foldAtom));
-      await update($, foldAtom, () => isOpen);
+      const isOpen = !(await readFold($));
+      await $.state.set(foldRef, isOpen);
 
       return { text: isOpen ? "Showing every finished agent." : "Folding finished agents again." };
     }
@@ -161,7 +167,7 @@ export const register: Register = (on) => {
     }
     if (arg === "open") {
       // A command is the person's own input, so it may switch the main view.
-      const target = findNode(await read($, graphAtom), rest.join(" "));
+      const target = findNode(await readGraph($), rest.join(" "));
       if (!target || target.kind === "session") {
         return { text: `No agent matches "${rest.join(" ")}". Hover a card to see its id.` };
       }
@@ -182,7 +188,7 @@ export const register: Register = (on) => {
       };
     }
     if (arg === "export") {
-      const copied = await $.ui.copy({ text: overview(await read($, graphAtom)) });
+      const copied = await $.ui.copy({ text: overview(await readGraph($)) });
 
       return {
         text: copied.isCopied
@@ -336,13 +342,13 @@ export const register: Register = (on) => {
     if (e.props.hasSurvey) {
       return beneath;
     }
-    const graph = await read($, graphAtom);
+    const graph = await readGraph($);
     // Nothing to show until the session starts an agent or side session.
     if (!graph.nodes.some((n) => n.kind !== "main")) {
       return beneath;
     }
     const { Box, Button, Text } = $.ui.resolve(e);
-    const isEnabled = await read($, isOnAtom);
+    const isEnabled = await readIsOn($);
     // The band's one jump: the first agent that is waiting on the person.
     const waiting = isEnabled
       ? graph.nodes.find((n) => n.kind === "agent" && n.status === "wait")
@@ -388,16 +394,16 @@ export const register: Register = (on) => {
 
   on("ui.render", { component: "Pane", requestId: PANE }, async ($, e) => {
     const { Box, Button, Text } = $.ui.resolve(e);
-    const isEnabled = await read($, isOnAtom);
-    const graph = await read($, graphAtom);
-    const isFoldOpen = await read($, foldAtom);
+    const isEnabled = await readIsOn($);
+    const graph = await readGraph($);
+    const isFoldOpen = await readFold($);
     const header = isEnabled
       ? totals(graph)
       : `Off for this session. No events recorded. ${totals(graph)}`;
     const copy = async () => {
       // The latest graph, not the one this draw was made from.
       const copied = await $.ui.copy({
-        text: overview(await read($, graphAtom)),
+        text: overview(await readGraph($)),
         surface: e.surface,
       });
       $.ui.toast(
@@ -487,7 +493,7 @@ export const register: Register = (on) => {
     );
 
     if (e.surface !== "terminal") {
-      // Not reading nowAtom here: each new SVG source reloads its frame, so it redraws only with the graph.
+      // Not reading nowRef here: each new SVG source reloads its frame, so it redraws only with the graph.
       const { Svg } = $.ui.resolve(e);
       const natural = svgSize(graph, isFoldOpen);
       // shortcut: the pane's width in pixels is estimated from its cells; measure it if a surface reports pixels.
@@ -507,7 +513,7 @@ export const register: Register = (on) => {
       );
     }
 
-    const now = Math.max(graph.now, await read($, nowAtom));
+    const now = Math.max(graph.now, await readNow($));
     const tree = layoutTree(graph, isFoldOpen);
 
     // Switching the main view is allowed only from the person's own press, which these closures are.
@@ -629,7 +635,7 @@ export const register: Register = (on) => {
         borderDimColor
         paddingX={1}
       >
-        <Button key={`fold-${f.parentId}`} plain onPress={() => update($, foldAtom, () => true)}>
+        <Button key={`fold-${f.parentId}`} plain onPress={() => $.state.set(foldRef, true)}>
           <Text dimColor>▸ {plural(f.count, "finished agent")} · show</Text>
         </Button>
       </Box>
@@ -706,7 +712,7 @@ export const register: Register = (on) => {
           </Box>
           {...hasOpenFold
             ? [
-                <Button key="fold-close" plain onPress={() => update($, foldAtom, () => false)}>
+                <Button key="fold-close" plain onPress={() => $.state.set(foldRef, false)}>
                   <Text dimColor>▾ fold finished agents</Text>
                 </Button>,
               ]
@@ -900,12 +906,8 @@ async function refresh($: EngineInterface): Promise<AgentTreeGraph | undefined> 
     live.coarseSig = coarse;
     live.fineSig = fine;
     live.lastWriteAt = graph.now;
-    await update($, graphAtom, () => graph);
-    await update(
-      $,
-      historyAtom,
-      () => JSON.parse(JSON.stringify(live.history)) as AgentTreeHistory,
-    );
+    await $.state.set(graphRef, graph);
+    await $.state.set(historyRef, JSON.parse(JSON.stringify(live.history)) as AgentTreeHistory);
     if (live.storeKey) {
       await $.store
         .set(live.storeKey, live.history)
@@ -1016,7 +1018,7 @@ async function tick($: EngineInterface) {
   const graph = await refresh($);
   // Ages only move while something runs; an idle session draws nothing new.
   if (graph?.nodes.some((n) => isLive(n.status))) {
-    await update($, nowAtom, () => graph.now);
+    await $.state.set(nowRef, graph.now);
   }
 }
 
@@ -1036,7 +1038,7 @@ async function showConversation($: EngineInterface, n: AgentTreeNode) {
 
 async function setOn($: EngineInterface, value: boolean) {
   live.isOn = value;
-  await update($, isOnAtom, () => value);
+  await $.state.set(isOnRef, value);
   if (value) {
     startTicking($);
   } else {
