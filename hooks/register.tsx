@@ -726,18 +726,18 @@ export const register: Register = (on) => {
 };
 
 function record(id: string, tool: string, input: Record<string, unknown>, now: number) {
-  const h = live.history;
-  const c = h.counters[id] ?? { calls: 0 };
-  h.counters[id] = { calls: c.calls + 1, lastTool: tool, lastAt: now };
+  const hist = live.history;
+  const c = hist.counters[id] ?? { calls: 0 };
+  hist.counters[id] = { calls: c.calls + 1, lastTool: tool, lastAt: now };
   const action = describeAction(tool, input);
-  h.actions[id] = action;
-  const seen = (h.seen[id] ??= {});
+  hist.actions[id] = action;
+  const seen = (hist.seen[id] ??= {});
   if (seen[action] !== undefined || Object.keys(seen).length < SEEN_CAP) {
     seen[action] = (seen[action] ?? 0) + 1;
   }
   const file = editedFile(tool, input);
-  if (file && !(h.edited[id] ?? []).includes(file)) {
-    h.edited[id] = [...(h.edited[id] ?? []), file];
+  if (file && !(hist.edited[id] ?? []).includes(file)) {
+    hist.edited[id] = [...(hist.edited[id] ?? []), file];
   }
 }
 
@@ -750,25 +750,25 @@ function kick($: EngineInterface) {
 }
 
 /** Keeps a long session's saved history small by forgetting the oldest finished agents past AGENT_CAP. */
-function prune(h: AgentTreeHistory) {
-  const ids = Object.keys(h.agents);
+function prune(hist: AgentTreeHistory) {
+  const ids = Object.keys(hist.agents);
   const finished = ids
-    .filter((id) => h.agents[id]?.status === "done" || h.agents[id]?.status === "fail")
-    .sort((a, b) => (h.endedAt[a] ?? 0) - (h.endedAt[b] ?? 0));
+    .filter((id) => hist.agents[id]?.status === "done" || hist.agents[id]?.status === "fail")
+    .sort((a, b) => (hist.endedAt[a] ?? 0) - (hist.endedAt[b] ?? 0));
   for (const id of finished.slice(0, Math.max(0, ids.length - AGENT_CAP))) {
-    delete h.agents[id];
+    delete hist.agents[id];
     for (const map of [
-      h.models,
-      h.startedAt,
-      h.endedAt,
-      h.results,
-      h.tasks,
-      h.actions,
-      h.edited,
-      h.seen,
-      h.costs,
-      h.tokens,
-      h.counters,
+      hist.models,
+      hist.startedAt,
+      hist.endedAt,
+      hist.results,
+      hist.tasks,
+      hist.actions,
+      hist.edited,
+      hist.seen,
+      hist.costs,
+      hist.tokens,
+      hist.counters,
     ]) {
       delete map[id];
     }
@@ -807,16 +807,16 @@ async function setMainStatus($: EngineInterface, status: AgentTreeStatus) {
 async function snapshot($: EngineInterface): Promise<AgentTreeGraph> {
   const now = await $.clock.now();
   const agents = await $.agent.list();
-  const h = live.history;
-  prune(h);
+  const hist = live.history;
+  prune(hist);
   const details = (id: string) => ({
-    ...(h.counters[id] ?? { calls: 0 }),
-    task: h.tasks[id],
-    action: h.actions[id],
-    edited: h.edited[id],
+    ...(hist.counters[id] ?? { calls: 0 }),
+    task: hist.tasks[id],
+    action: hist.actions[id],
+    edited: hist.edited[id],
     repeat: repeatOf(id),
-    costUsd: h.costs[id],
-    tokens: h.tokens[id],
+    costUsd: hist.costs[id],
+    tokens: hist.tokens[id],
   });
   const nodes: AgentTreeNode[] = [
     {
@@ -826,13 +826,13 @@ async function snapshot($: EngineInterface): Promise<AgentTreeGraph> {
       label: "this session",
       type: "session",
       status: live.mainStatus,
-      model: h.mainModel,
-      startedAt: h.sessionStartedAt,
+      model: hist.mainModel,
+      startedAt: hist.sessionStartedAt,
       ...details(MAIN),
     },
   ];
   for (const a of agents) {
-    h.agents[a.id] = {
+    hist.agents[a.id] = {
       label: a.description || a.name || a.type,
       type: a.type,
       parentId: a.parentId ?? MAIN,
@@ -840,16 +840,16 @@ async function snapshot($: EngineInterface): Promise<AgentTreeGraph> {
     };
   }
   const listed = new Set(agents.map((a) => a.id));
-  for (const [id, a] of Object.entries(h.agents)) {
+  for (const [id, a] of Object.entries(hist.agents)) {
     // The list drops an agent once it ends (a nested one, say); keep it, as finished, for the overview.
     const status = live.needsYou[id]
       ? "wait"
       : listed.has(id) || a.status === "fail"
         ? a.status
         : "done";
-    h.startedAt[id] ??= now;
+    hist.startedAt[id] ??= now;
     if (status === "done" || status === "fail") {
-      h.endedAt[id] ??= now;
+      hist.endedAt[id] ??= now;
     }
     nodes.push({
       id,
@@ -858,23 +858,26 @@ async function snapshot($: EngineInterface): Promise<AgentTreeGraph> {
       label: a.label,
       type: a.type,
       status,
-      model: h.models[id],
-      startedAt: h.startedAt[id] ?? now,
-      endedAt: h.endedAt[id],
-      result: h.results[id],
+      model: hist.models[id],
+      startedAt: hist.startedAt[id] ?? now,
+      endedAt: hist.endedAt[id],
+      result: hist.results[id],
       ...details(id),
     });
   }
-  nodes.push(...h.sideSessions.map((n) => ({ ...n })));
-  h.peak = Math.max(h.peak, nodes.filter((n) => n.kind !== "main" && n.status === "run").length);
+  nodes.push(...hist.sideSessions.map((n) => ({ ...n })));
+  hist.peak = Math.max(
+    hist.peak,
+    nodes.filter((n) => n.kind !== "main" && n.status === "run").length,
+  );
 
   return {
     nodes,
     ctxPercent: live.ctxPercent,
     costUsd: live.costUsd,
-    waitMs: h.waitMs,
-    peak: h.peak,
-    startedAt: h.sessionStartedAt,
+    waitMs: hist.waitMs,
+    peak: hist.peak,
+    startedAt: hist.sessionStartedAt,
     now,
   };
 }

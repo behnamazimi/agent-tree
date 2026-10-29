@@ -40,6 +40,7 @@ Agent tree only watches. It makes no network requests and sends nothing anywhere
 - **Hooks:** it listens to session, turn, prompt, notification, agent start and stop, and tool-call events to build the tree. Every hook passes the event on unchanged, so it never alters a prompt, a tool call or a permission.
 - **Side sessions:** it recognises a started side session by the `mcp__ccd_session__start_session` tool call, which comes from the Claude desktop app, not from this plugin.
 - **Storage:** each conversation's tree is kept in Claude Code's own per-plugin store on your machine, so a resumed session shows its earlier agents.
+- **Conversation view:** `/agent-tree open <agent>` calls `$.ui.view` to switch the app's own view to that agent's conversation. It moves the screen on your machine and sends nothing.
 - **Clipboard:** `/agent-tree export` copies the outline to your clipboard, and only when you run it.
 - **Screen:** it draws the tree above the prompt, in a pane, and in the status line, and shows a toast when an agent waits on you.
 
