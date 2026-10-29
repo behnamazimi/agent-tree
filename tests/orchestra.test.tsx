@@ -5,6 +5,7 @@ import type { AgentInfo, On } from "claude-code";
 import { renderGraphSvg } from "../hooks/svg";
 import {
   attributeCost,
+  barCells,
   describeAction,
   editedFile,
   flags,
@@ -76,8 +77,27 @@ const baseAgents: AgentInfo[] = [
 ];
 
 /** Stands for the engine; `beneath` is what another plugin's band under orchestra draws. */
-function engine(on: On, agents: AgentInfo[] = baseAgents, beneath = "") {
+function engine(
+  on: On,
+  agents: AgentInfo[] = baseAgents,
+  beneath = "",
+  { viewDeny, store }: { viewDeny?: string; store?: Record<string, unknown> } = {},
+) {
   const viewed: unknown[] = [];
+  // A plain object rather than mock.store, so a test can read what was kept.
+  const kept = store ?? {};
+  on("store.get", (_, e) => ({ value: kept[e.key] }));
+  on("store.set", (_, e) => {
+    kept[e.key] = JSON.parse(JSON.stringify(e.value));
+
+    return { value: undefined };
+  });
+  on("store.delete", (_, e) => {
+    delete kept[e.key];
+
+    return { value: undefined };
+  });
+  on("store.keys", () => ({ value: Object.keys(kept) }));
   on("ui.render", { component: "AbovePrompt" }, ($, e) => {
     const { Box, Text } = $.ui.resolve(e);
 
@@ -88,7 +108,7 @@ function engine(on: On, agents: AgentInfo[] = baseAgents, beneath = "") {
   on("ui.view", (_, e) => {
     viewed.push(e);
 
-    return { value: {} };
+    return { value: viewDeny ? { deny: viewDeny } : {} };
   });
   on("agent.list", () => ({ value: agents }));
   on("session.usage", () => ({
@@ -231,9 +251,106 @@ test("on the terminal each agent is a tile whose title opens its conversation", 
   const pane = await $.ui.mount({ ...PANE, surface: "terminal" });
   expect(await pane.find({ type: "Box", key: "tile-a3" })).toBeDefined();
   expect((await pane.find({ type: "Text", text: /needs you/ }))?.props.color).toBe("warning");
-  expect((await pane.find({ type: "Client", key: "wires-client" }))?.props.module).toContain("wires");
+  expect(await pane.find({ type: "Text", text: "▶" })).toBeDefined();
   await pane.press({ key: "open-a2" });
   expect(viewed).toEqual([{ agentId: "a2" }]);
+  await pane.unmount();
+});
+
+test("terminal wires are part of the pane's tree and pulse one step per redraw", async ($, on) => {
+  const clock = mock.clock(on);
+  engine(on);
+  await $.session.start({ cwd: "/", surface: "terminal", isInteractive: true });
+  await clock.advance(1100);
+
+  const pane = await $.ui.mount({ ...PANE, surface: "terminal" });
+  // A Client stayed at the body's top while the tiles scrolled; none is drawn now.
+  expect(await pane.find({ type: "Client" })).toBeUndefined();
+  // The keys of the wire cells drawn lit, read from the whole tree.
+  const lit = async () => {
+    const keys: string[] = [];
+    const walk = (el: unknown, key?: string) => {
+      if (Array.isArray(el)) {
+        el.forEach((c) => walk(c, key));
+      } else if (el === "•" && key) {
+        keys.push(key);
+      } else if (el && typeof el === "object" && "props" in el) {
+        const { props, children } = el as { props: { key?: string }; children?: unknown };
+        walk(children, props.key ?? key);
+      }
+    };
+    walk(await pane.drawn());
+
+    return keys;
+  };
+  const before = await lit();
+  expect(before.length).toBeGreaterThan(0);
+  await clock.advance(1000);
+  expect(await lit()).not.toEqual(before);
+  await pane.unmount();
+});
+
+test("a bar's cells follow its span on the axis, one cell at least", () => {
+  expect(barCells(0, 10_000, 0, 10_000, 20)).toEqual([0, 20]);
+  expect(barCells(5_000, 10_000, 0, 10_000, 20)).toEqual([10, 10]);
+  // Too short to show still takes a cell, and one starting at the end stays on the axis.
+  expect(barCells(2_000, 2_001, 0, 10_000, 20)).toEqual([4, 1]);
+  expect(barCells(10_000, 10_000, 0, 10_000, 20)).toEqual([19, 1]);
+});
+
+test("the terminal pane has a timeline row per tile", async ($, on) => {
+  const clock = mock.clock(on);
+  engine(on);
+  await $.session.start({ cwd: "/", surface: "terminal", isInteractive: true });
+  await clock.advance(1100);
+
+  const pane = await $.ui.mount({ ...PANE, surface: "terminal" });
+  expect(await pane.find({ type: "Text", text: "Timeline" })).toBeDefined();
+  // The session and its three agents.
+  for (let k = 0; k < 4; k++) {
+    expect(await pane.find({ type: "Box", key: `tl-${k}` })).toBeDefined();
+  }
+  expect(await pane.find({ type: "Box", key: "tl-4" })).toBeUndefined();
+  expect(await pane.find({ type: "Text", text: /^ +0s .* now$/ })).toBeDefined();
+  await pane.unmount();
+});
+
+test("while an agent is in view the main tile offers the way back", async ($, on) => {
+  const clock = mock.clock(on);
+  const { viewed } = engine(on);
+  await $.session.start({ cwd: "/", surface: "terminal", isInteractive: true });
+  await clock.advance(1100);
+
+  const inMain = await $.ui.mount({ ...PANE, surface: "terminal" });
+  expect(await inMain.find({ key: "back-main" })).toBeUndefined();
+  await inMain.unmount();
+
+  const inAgent = await $.ui.mount({
+    ...PANE,
+    surface: "terminal",
+    props: { ...PANE.props, view: { agentId: "a2" } },
+  });
+  await inAgent.press({ key: "back-main" });
+  expect(viewed).toEqual([{}]);
+  await inAgent.unmount();
+});
+
+test("a tile press the engine refuses says why in a toast", async ($, on) => {
+  const clock = mock.clock(on);
+  engine(on, baseAgents, "", { viewDeny: "the view moved meanwhile" });
+  const toasts: string[] = [];
+  on("ui.toast", (_, e, next) => {
+    toasts.push(e.text);
+
+    return next(e);
+  });
+  await $.session.start({ cwd: "/", surface: "terminal", isInteractive: true });
+  await clock.advance(1100);
+
+  const pane = await $.ui.mount({ ...PANE, surface: "terminal" });
+  await pane.press({ key: "open-main" });
+  await clock.advance(10);
+  expect(toasts).toContain("Could not show this session: the view moved meanwhile");
   await pane.unmount();
 });
 
@@ -465,6 +582,47 @@ test("/orchestra export copies an outline with nested agents indented", async ($
   expect(copied[0]).toContain("    - **Nested scan**");
 });
 
+test("/orchestra open says why where the app cannot switch views", async ($, on) => {
+  const clock = mock.clock(on);
+  engine(on, baseAgents, "", { viewDeny: "no main view here" });
+  await $.session.start({ cwd: "/", surface: "desktop", isInteractive: true });
+  await clock.advance(1100);
+
+  expect((await run($, "open")).text).toBe("Usage: /orchestra open <agent id or name>, or main");
+  expect((await run($, "open main")).text).toBe(
+    "You're already in this session (no main view here).",
+  );
+  const shown = (await run($, "open a2")).text;
+  expect(shown).toMatch(/^Search the repo \(running\)\n/);
+  expect(shown).toContain("\nStarted: ");
+  expect(shown).toEndWith("\n\nThis app can't switch to its conversation (no main view here).");
+});
+
+test("an agent's result is its final answer, not the launch notice", async ($, on) => {
+  const clock = mock.clock(on);
+  engine(on);
+  on("turn.complete", (_, e) => ({ text: e.answer }));
+  const copied: string[] = [];
+  on("ui.copy", (_, e) => {
+    copied.push(e.text);
+
+    return { value: { isCopied: true } };
+  });
+  await $.session.start({ cwd: "/", surface: "terminal", isInteractive: true });
+  await $.turn.complete({
+    agentId: "a2",
+    answer: "The command printed:\n\n```\nhello\n```",
+    durationMs: 3000,
+    isAborted: false,
+    turnId: "t1",
+    reason: "answer",
+  });
+  await clock.advance(1100);
+
+  await run($, "export");
+  expect(copied[0]).toMatch(/\*\*Search the repo\*\* \(.*\): The command printed: ``` hello ```/);
+});
+
 test("animations resume at the same phase after a redraw", () => {
   const graph: OrchestraGraph = {
     nodes: [node("main", null, "run"), node("a", "main", "run")],
@@ -552,6 +710,39 @@ test("history is saved to session state as it changes", async ($, on) => {
   expect(last?.counters.main?.calls).toBe(1);
   expect(last?.edited.main).toEqual(["/x/a.ts"]);
   expect(last?.actions.main).toBe("Edit /x/a.ts");
+});
+
+test("a resumed conversation gets its history back from the store, and old ones are dropped", async ($, on) => {
+  const clock = mock.clock(on);
+  const store: Record<string, unknown> = {
+    // session.usage's startedAt is 0 in this engine, so "history:0" is this conversation.
+    "history:0": {
+      agents: { gone: { label: "Ran before the resume", type: "Explore", parentId: "main", status: "done" } },
+      results: { gone: "printed hello" },
+    },
+  };
+  for (let i = 1; i <= 10; i++) {
+    store[`history:${i}`] = {};
+  }
+  engine(on, [], "", { store });
+  const copied: string[] = [];
+  on("ui.copy", (_, e) => {
+    copied.push(e.text);
+
+    return { value: { isCopied: true } };
+  });
+  await $.session.start({ cwd: "/", surface: "terminal", isInteractive: true });
+  await clock.advance(1100);
+
+  await run($, "export");
+  expect(copied[0]).toMatch(/\*\*Ran before the resume\*\* \(done.*\): printed hello/);
+  const band = await $.ui.mount({ ...BAND, surface: "terminal" });
+  expect(await band.find({ key: "toggle" })).toBeDefined();
+  await band.unmount();
+  // This conversation and the seven newest others are kept.
+  expect(Object.keys(store).sort()).toEqual(
+    ["history:0", "history:4", "history:5", "history:6", "history:7", "history:8", "history:9", "history:10"].sort(),
+  );
 });
 
 test("the layout keeps a row between tiles and wires every child to its parent", () => {

@@ -5,9 +5,11 @@ import type { OrchestraGraph, OrchestraHistory, OrchestraNode, OrchestraStatus }
 import {
   age,
   attributeCost,
+  barCells,
   isLive,
   clip,
   describeAction,
+  detailLines,
   editedFile,
   flags,
   FOLD_AFTER,
@@ -18,16 +20,17 @@ import {
   note,
   overview,
   plural,
+  report,
   STATUS_COLOR,
   statusColor,
   summarize,
   TILE_H,
   TILE_W,
+  timelineRows,
   totals,
 } from "./graph";
 import type { PlacedFold, PlacedTile } from "./graph";
 import { renderBarSvg, renderGraphSvg, svgSize } from "./svg";
-import type { WiresProps } from "./wires";
 
 const PANE = "orchestra";
 const MAIN = "main";
@@ -39,8 +42,15 @@ const PX_PER_COLUMN = 10;
 const FINE_REDRAW_MS = 10_000;
 // Each new SVG source reloads its frame, which shows as a blink; between events it is only refreshed this often.
 const SVG_REFRESH_MS = 300_000;
-const CARD_ROOM = 9;
 const SEEN_CAP = 50;
+// Every fourth cell of a live wire is lit; the lit cells step one along per redraw.
+const PULSE_EVERY = 4;
+// The terminal timeline's label column at most, and room for a duration such as "12m05".
+const TL_LABEL_W = 24;
+const TL_TOOK_W = 5;
+const HISTORY_PREFIX = "history:";
+// Each history is capped by AGENT_CAP; a few fit well under the store's 4 MiB.
+const HISTORIES_KEPT = 8;
 
 const isOnAtom = atom({ plugin: "orchestra", key: "isOn" } as const, true);
 const graphAtom = atom(
@@ -90,6 +100,8 @@ const emptyHistory = (now: number): OrchestraHistory => ({
 // The hot path reads module state; refresh() saves `history` to $.state and session.start loads it back.
 const live = {
   isOn: true,
+  /** Where this conversation's history is kept in `$.store`, so a resume under a new session id finds it. */
+  storeKey: undefined as string | undefined,
   /** How many nodes waited on the person at the last refresh; the status and toast fire on its changes. */
   waitCount: 0,
   timer: undefined as Timer | undefined,
@@ -100,8 +112,6 @@ const live = {
   coarseSig: "",
   /** Agents whose permission prompt is up, with its message; cleared once their call goes through. */
   needsYou: {} as Record<string, string>,
-  /** Agent tool call id to the agent it started, so the call's result text can become that agent's result. */
-  spawned: {} as Record<string, string>,
   fineSig: "",
   /** The desktop pane's last SVG, reused while its key (shape and status) holds. */
   svg: undefined as { key: string; at: number; source: string } | undefined,
@@ -117,8 +127,11 @@ export const register: Register = (on) => {
         "Orchestra view for this session: on, off, view, all (fold or unfold finished agents), open <agent>, or export (copy the overview)",
       argumentHint: "on|off|view|all|open <agent>|export",
     });
+    live.storeKey = await historyKey($);
+    // Session state lasts as long as the process; a resumed conversation finds its history in the store instead.
+    const saved = (await read($, historyAtom)) ?? (await restoreHistory($));
     // A history saved by an older version lacks the newer fields; the empty one fills them.
-    live.history = { ...emptyHistory(await $.clock.now()), ...(await read($, historyAtom)) };
+    live.history = { ...emptyHistory(await $.clock.now()), ...saved };
     // Cost spent before the mod loaded belongs to no agent it saw.
     live.history.lastUsd = Math.max(live.history.lastUsd, (await sessionUsd($)) ?? 0);
     live.isOn = await read($, isOnAtom);
@@ -143,6 +156,9 @@ export const register: Register = (on) => {
 
       return { text: isOpen ? "Showing every finished agent." : "Folding finished agents again." };
     }
+    if (arg === "open" && rest.length === 0) {
+      return { text: "Usage: /orchestra open <agent id or name>, or main" };
+    }
     if (arg === "open") {
       // A command is the person's own input, so it may switch the main view.
       const target = findNode(await read($, graphAtom), rest.join(" "));
@@ -151,7 +167,19 @@ export const register: Register = (on) => {
       }
       const moved = await $.ui.view(target.kind === "agent" ? { agentId: target.id } : {});
 
-      return { text: moved.deny ? `Could not open it: ${moved.deny}` : `Showing ${target.label}.` };
+      if (!moved.deny) {
+        return { text: `Showing ${target.label}.` };
+      }
+
+      // The desktop app has no switchable main view, so the session is the only conversation in it.
+      if (target.kind === "main") {
+        return { text: `You're already in this session (${moved.deny}).` };
+      }
+
+      // Its conversation cannot be shown here, so show what orchestra knows of it instead.
+      return {
+        text: `${report(target, await $.clock.now())}\n\nThis app can't switch to its conversation (${moved.deny}).`,
+      };
     }
     if (arg === "export") {
       const copied = await $.ui.copy({ text: overview(await read($, graphAtom)) });
@@ -185,6 +213,11 @@ export const register: Register = (on) => {
   });
 
   on("turn.complete", async ($, e, next) => {
+    // A subagent's turn end carries its report whole; the Agent call's own text is only a launch notice for a background agent.
+    const answer = e.answer.replace(/\s+/g, " ").trim();
+    if (live.isOn && e.agentId && answer) {
+      live.history.results[e.agentId] = clip(answer, 300);
+    }
     try {
       const result = await next(e);
       live.history.mainModel = result.usage?.model ?? live.history.mainModel;
@@ -232,7 +265,6 @@ export const register: Register = (on) => {
   on("agent.spawn", async ($, e, next) => {
     const result = await next(e);
     if (live.isOn && result.agentId) {
-      live.spawned[e.tool_use_id] = result.agentId;
       live.history.startedAt[result.agentId] = await $.clock.now();
       live.history.models[result.agentId] = result.model;
       live.history.tasks[result.agentId] = clip(e.prompt.replace(/\s+/g, " ").trim(), 300);
@@ -244,11 +276,6 @@ export const register: Register = (on) => {
 
   on("classic.SubagentStop", async ($, e, next) => {
     if (live.isOn) {
-      const firstLine = e.last_assistant_message?.trim().split("\n")[0];
-      // The host often sends this empty; the parent's Agent call result then fills it (see tool.call).
-      if (firstLine) {
-        live.history.results[e.agent_id] = firstLine.slice(0, 200);
-      }
       live.history.endedAt[e.agent_id] ??= await $.clock.now();
       kick($);
     }
@@ -267,14 +294,7 @@ export const register: Register = (on) => {
     record(id, tool, input, now);
     if (tool !== START_SESSION_TOOL) {
       try {
-        const ran = await next(e);
-        const agentId = live.spawned[e.tool_use_id];
-        const firstLine = ran.text?.trim().split("\n")[0];
-        if (agentId && firstLine) {
-          live.history.results[agentId] ??= firstLine.slice(0, 200);
-        }
-
-        return ran;
+        return await next(e);
       } finally {
         // The call ended, so whatever it asked the person is answered.
         delete live.needsYou[id];
@@ -338,7 +358,7 @@ export const register: Register = (on) => {
                 key="jump"
                 label={`Jump to ${clip(waiting.label, 28)}`}
                 variant="primary"
-                onPress={() => void $.ui.view({ agentId: waiting.id })}
+                onPress={() => void showConversation($, waiting)}
               />,
             ]
           : []}
@@ -487,16 +507,9 @@ export const register: Register = (on) => {
 
     const now = Math.max(graph.now, await read($, nowAtom));
     const tree = layoutTree(graph, isFoldOpen);
-    const wires: WiresProps = {
-      wires: tree.wires,
-      width: tree.width,
-      height: tree.height,
-      isPaused: !isEnabled,
-    };
 
     // Switching the main view is allowed only from the person's own press, which these closures are.
-    const openTo = (n: OrchestraNode) => () =>
-      void $.ui.view(n.kind === "agent" ? { agentId: n.id } : {});
+    const openTo = (n: OrchestraNode) => () => void showConversation($, n);
 
     const tile = ({ node: n, x, y }: PlacedTile) => {
       const color = STATUS_COLOR[n.status];
@@ -547,13 +560,18 @@ export const register: Register = (on) => {
             </Button>
           )}
           <Text dimColor>{clip(meta(n, graph, now), TILE_W - 4)}</Text>
-          <Text
-            italic
-            color={n.status === "wait" ? "warning" : n.status === "fail" ? "error" : undefined}
-            dimColor={n.status !== "wait" && n.status !== "fail"}
-          >
-            {clip(note(n), TILE_W - 4)}
-          </Text>
+          {n.kind === "main" && e.props.view.agentId !== undefined ? (
+            // The main session has no result line, so its row holds the way back while an agent is in view.
+            <Button key="back-main" label="Back to this session" onPress={openTo(n)} />
+          ) : (
+            <Text
+              italic
+              color={n.status === "wait" ? "warning" : n.status === "fail" ? "error" : undefined}
+              dimColor={n.status !== "wait" && n.status !== "fail"}
+            >
+              {clip(note(n), TILE_W - 4)}
+            </Text>
+          )}
           <Text color="warning">
             {warnings.length ? `⚑ ${clip(warnings.join(" · "), TILE_W - 6)}` : " "}
           </Text>
@@ -563,16 +581,7 @@ export const register: Register = (on) => {
 
     // Drawn after every tile, so it paints over the tiles below its own.
     const card = ({ node: n, x, y }: PlacedTile) => {
-      const lines: [string, string][] = [
-        ["Task", n.task],
-        [n.status === "wait" ? "Waiting on" : "Now", n.status === "done" ? undefined : n.action],
-        ["Result", n.result],
-        ["Edited", n.edited?.map((f) => f.split("/").pop()).join(", ")],
-        [
-          "Started",
-          `${age(n.startedAt, now)} ago${n.endedAt ? ` · took ${age(n.startedAt, n.endedAt)}` : ""}`,
-        ],
-      ].filter((line): line is [string, string] => Boolean(line[1]));
+      const lines = detailLines(n, now);
 
       return (
         <Box
@@ -598,9 +607,8 @@ export const register: Register = (on) => {
           {n.kind === "agent" ? (
             <Button key={`jump-${n.id}`} label="Open conversation" onPress={openTo(n)} />
           ) : (
-            <Text dimColor>
-              {n.kind === "main" ? "Click the title to return to the main conversation" : " "}
-            </Text>
+            // The way back to the main conversation is the main tile's own button, shown while an agent is in view.
+            <Text> </Text>
           )}
         </Box>
       );
@@ -625,39 +633,84 @@ export const register: Register = (on) => {
       </Box>
     );
 
-    // Only the terminal reaches here; its Client animates the wires behind the tiles.
-    const { Client } = $.ui.resolve(e);
+    // Only the terminal reaches here. The wires are part of this tree, not a Client: a Client stayed at the
+    // body's top while the tiles scrolled. Their pulses step with the once-a-second redraw while agents run.
+    const phase = isEnabled ? Math.floor(now / TICK_MS) : -1;
     const wireLayer = [
-      <Box key="wires" position="absolute" top={0} left={0}>
-        <Client
-          key="wires-client"
-          module="./wires.tsx"
-          props={wires}
-          width={tree.width}
-          height={tree.height}
-        />
+      <Box key="wires" position="absolute" top={0} left={0} width={tree.width} height={tree.height}>
+        {tree.wires.map((w) => {
+          const isPulse = phase >= 0 && w.step !== undefined && (w.step - phase) % PULSE_EVERY === 0;
+
+          return (
+            <Box key={`w${w.x},${w.y}`} position="absolute" top={w.y} left={w.x}>
+              <Text color={w.color} dimColor={w.dim} bold={isPulse}>
+                {isPulse ? "•" : w.ch}
+              </Text>
+            </Box>
+          );
+        })}
       </Box>,
     ];
 
     const hasOpenFold =
       isFoldOpen && graph.nodes.filter((n) => n.status === "done").length > FOLD_AFTER;
 
+    // The desktop's timeline in cells: one bar per tile on an axis from the session's start to now.
+    const rows = timelineRows(graph, tree.tiles);
+    const start = graph.startedAt ?? Math.min(now, ...graph.nodes.map((n) => n.startedAt));
+    const end = Math.max(start + 1000, now);
+    const labelW = Math.min(TL_LABEL_W, Math.max(...rows.map((r) => r.label.length)));
+    const tlCols = Math.max(10, e.props.bodyColumns - labelW - TL_TOOK_W - 4);
+    const mid = age(start, start + (end - start) / 2);
+    const midAt = Math.floor((tlCols - mid.length) / 2);
+    const axis = `0s${" ".repeat(Math.max(1, midAt - 2))}${mid}${" ".repeat(Math.max(1, tlCols - midAt - mid.length - 3))}now`;
+    const timelineView = (
+      <Box key="timeline" flexDirection="column">
+        <Text bold dimColor>
+          Timeline
+        </Text>
+        {rows.map((r, k) => {
+          const [first, length] = barCells(r.startedAt, r.endedAt ?? end, start, end, tlCols);
+          const isDone = r.status === "done";
+
+          return (
+            <Box key={`tl-${k}`} flexDirection="row" gap={1}>
+              <Text dimColor={isDone}>{clip(r.label, labelW).padEnd(labelW)}</Text>
+              <Text>
+                {" ".repeat(first)}
+                <Text color={STATUS_COLOR[r.status]} dimColor={isDone}>
+                  {"━".repeat(length)}
+                </Text>
+                {" ".repeat(Math.max(0, tlCols - first - length))}
+              </Text>
+              <Text dimColor>{age(r.startedAt, r.endedAt ?? end)}</Text>
+            </Box>
+          );
+        })}
+        <Text dimColor>{`${" ".repeat(labelW + 1)}${axis}`}</Text>
+      </Box>
+    );
+
     return (
       <Box flexDirection="column" gap={1}>
         {headerRow}
-        <Box width={tree.width + CARD_W} height={tree.height + CARD_ROOM}>
-          {...wireLayer}
-          {tree.tiles.map(tile)}
-          {tree.folds.map(foldTile)}
+        {/* The tiles start at this Box's top, so the cards, drawn last, sit by their tiles and over the timeline. */}
+        <Box flexDirection="column" gap={1}>
+          <Box width={tree.width + CARD_W} height={tree.height}>
+            {...wireLayer}
+            {tree.tiles.map(tile)}
+            {tree.folds.map(foldTile)}
+          </Box>
+          {...hasOpenFold
+            ? [
+                <Button key="fold-close" plain onPress={() => update($, foldAtom, () => false)}>
+                  <Text dimColor>▾ fold finished agents</Text>
+                </Button>,
+              ]
+            : []}
+          {timelineView}
           {tree.tiles.map(card)}
         </Box>
-        {...hasOpenFold
-          ? [
-              <Button key="fold-close" plain onPress={() => update($, foldAtom, () => false)}>
-                <Text dimColor>▾ fold finished agents</Text>
-              </Button>,
-            ]
-          : []}
       </Box>
     );
   });
@@ -850,9 +903,42 @@ async function refresh($: EngineInterface): Promise<OrchestraGraph | undefined> 
       historyAtom,
       () => JSON.parse(JSON.stringify(live.history)) as OrchestraHistory,
     );
+    if (live.storeKey) {
+      await $.store
+        .set(live.storeKey, live.history)
+        .catch((err: unknown) => $.ui.log(`orchestra: history not saved for a resume (${String(err)})`));
+    }
   }
 
   return graph;
+}
+
+/** A conversation keeps its first launch time across resumes, while its session id changes. */
+async function historyKey($: EngineInterface): Promise<string | undefined> {
+  try {
+    return `${HISTORY_PREFIX}${(await $.session.usage()).startedAt}`;
+  } catch {
+    return undefined;
+  }
+}
+
+/** This conversation's saved history, dropping all but the newest few others so the store stays small. */
+async function restoreHistory($: EngineInterface): Promise<OrchestraHistory | undefined> {
+  try {
+    const launches = (await $.store.keys())
+      .filter((k) => k.startsWith(HISTORY_PREFIX) && k !== live.storeKey)
+      .sort((a, b) => Number(a.slice(HISTORY_PREFIX.length)) - Number(b.slice(HISTORY_PREFIX.length)));
+    for (const k of launches.slice(0, Math.max(0, launches.length - (HISTORIES_KEPT - 1)))) {
+      await $.store.delete(k);
+    }
+
+    return live.storeKey
+      ? ((await $.store.get(live.storeKey)) as OrchestraHistory | undefined)
+      : undefined;
+  } catch {
+    // A store that cannot be read starts the view empty, as a new conversation would.
+    return undefined;
+  }
 }
 
 /**
@@ -931,6 +1017,14 @@ function startTicking($: EngineInterface) {
   live.timer?.cancel();
   live.timer = $.clock.every(TICK_MS, () => tick($).catch(ignore));
   kick($);
+}
+
+/** Puts an agent's conversation, or the main one, in view; a refusal is said rather than lost. */
+async function showConversation($: EngineInterface, n: OrchestraNode) {
+  const moved = await $.ui.view(n.kind === "agent" ? { agentId: n.id } : {});
+  if (moved.deny) {
+    $.ui.toast(`Could not show ${n.label}: ${moved.deny}`);
+  }
 }
 
 async function setOn($: EngineInterface, value: boolean) {

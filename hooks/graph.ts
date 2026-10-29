@@ -246,6 +246,32 @@ const STATUS_LABEL: Record<OrchestraStatus, string> = {
   fail: "failed",
 };
 
+/** A node's labelled details, as its hover card shows them; empty ones left out. */
+export function detailLines(n: OrchestraNode, now: number): [string, string][] {
+  return [
+    ["Task", n.task],
+    [n.status === "wait" ? "Waiting on" : "Now", n.status === "done" ? undefined : n.action],
+    ["Result", n.result],
+    ["Edited", n.edited?.map((f) => f.split("/").pop()).join(", ")],
+    [
+      "Started",
+      `${age(n.startedAt, now)} ago${n.endedAt ? ` · took ${age(n.startedAt, n.endedAt)}` : ""}`,
+    ],
+  ].filter((line): line is [string, string] => Boolean(line[1]));
+}
+
+/** A node as text, for where its conversation cannot be shown. */
+export function report(n: OrchestraNode, now: number): string {
+  const head = [STATUS_LABEL[n.status], n.model?.replace(/^claude-/, ""), spend(n)]
+    .filter(Boolean)
+    .join(" · ");
+
+  return [
+    `${n.label} (${head})`,
+    ...detailLines(n, now).map(([label, value]) => `${label}: ${value}`),
+  ].join("\n");
+}
+
 /** The pane header's pieces: agent count, per-status counts, and the session's figures. */
 export function headline(graph: OrchestraGraph) {
   const agents = graph.nodes.filter((n) => n.kind !== "main");
@@ -374,6 +400,40 @@ const COL_GAP = 8;
 const ANCHOR = 2;
 
 export type PlacedTile = { node: OrchestraNode; x: number; y: number };
+
+export type TimelineRow = { label: string; status: OrchestraStatus; startedAt: number; endedAt?: number };
+
+/** One bar per drawn card, and one per fold spanning the agents folded into it. */
+export function timelineRows(graph: OrchestraGraph, tiles: PlacedTile[]): TimelineRow[] {
+  const shown = new Set(tiles.map((t) => t.node.id));
+  const rows: TimelineRow[] = graph.nodes.filter((n) => shown.has(n.id));
+  const folded = graph.nodes.filter((n) => !shown.has(n.id));
+  if (folded.length) {
+    rows.push({
+      label: plural(folded.length, "finished agent"),
+      status: "done",
+      startedAt: Math.min(...folded.map((n) => n.startedAt)),
+      endedAt: Math.max(...folded.map((n) => n.endedAt ?? n.startedAt)),
+    });
+  }
+
+  return rows;
+}
+
+/** Where a bar from `from` to `to` starts on a `cols`-cell axis spanning `start` to `end`, and its length: one cell at least. */
+export function barCells(
+  from: number,
+  to: number,
+  start: number,
+  end: number,
+  cols: number,
+): [number, number] {
+  const at = (t: number) =>
+    Math.round(((Math.min(Math.max(t, start), end) - start) / Math.max(1, end - start)) * cols);
+  const first = Math.min(at(from), cols - 1);
+
+  return [first, Math.max(1, at(to) - first)];
+}
 export type PlacedFold = { parentId: string; count: number; x: number; y: number };
 /** One wire glyph at a cell; `path` and `step` order the live wires' cells so a pulse can travel them. */
 export type WireCell = {

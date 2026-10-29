@@ -1,6 +1,6 @@
 import type { OrchestraGraph, OrchestraNode, OrchestraStatus } from "../types";
-import { age, clip, flags, isLive, layoutTree, meta, note, plural, spend } from "./graph";
-import type { LayoutDims, PlacedFold, PlacedTile, TreeEdge } from "./graph";
+import { age, clip, flags, isLive, layoutTree, meta, note, plural, spend, timelineRows } from "./graph";
+import type { LayoutDims, PlacedFold, PlacedTile, TimelineRow, TreeEdge } from "./graph";
 
 const CARD_W = 236;
 const CARD_H = 84;
@@ -258,15 +258,6 @@ function popover(
       `started ${age(n.startedAt, now)} ago${n.endedAt ? ` · took ${age(n.startedAt, n.endedAt)}` : ""}`,
       1,
     ),
-    {
-      text:
-        n.kind === "agent"
-          ? `Jump in: /orchestra open ${n.id.slice(0, 6)}`
-          : n.kind === "main"
-            ? "Back here: /orchestra open main"
-            : "",
-      cls: "h",
-    },
   ].filter((l) => l.text !== "");
 
   return popBox(`p${i}`, lines, x, y, CARD_H, width, bottom);
@@ -349,25 +340,6 @@ function wrap(text: string, first: number, rest: number, maxLines: number): stri
   }
 
   return lines.map((l) => clip(l, rest));
-}
-
-type TimelineRow = { label: string; status: OrchestraStatus; startedAt: number; endedAt?: number };
-
-/** One bar per drawn card, and one per fold spanning the agents folded into it. */
-function timelineRows(graph: OrchestraGraph, tiles: PlacedTile[]): TimelineRow[] {
-  const shown = new Set(tiles.map((t) => t.node.id));
-  const rows: TimelineRow[] = graph.nodes.filter((n) => shown.has(n.id));
-  const folded = graph.nodes.filter((n) => !shown.has(n.id));
-  if (folded.length) {
-    rows.push({
-      label: plural(folded.length, "finished agent"),
-      status: "done",
-      startedAt: Math.min(...folded.map((n) => n.startedAt)),
-      endedAt: Math.max(...folded.map((n) => n.endedAt ?? n.startedAt)),
-    });
-  }
-
-  return rows;
 }
 
 function timeline(
