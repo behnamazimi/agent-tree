@@ -2,7 +2,7 @@
   "name": "agent-tree",
   "displayName": "Agent tree",
   "version": "0.2.0",
-  "description": "Live module graph of this session's subagents and side sessions, with a per-session switch above the prompt",
+  "description": "Live tree of this session's subagents and side sessions: who started whom, what each is doing, what it costs, and which one is waiting on you",
   "author": {
     "name": "Behnam Azimi",
     "url": "https://github.com/behnamazimi"
