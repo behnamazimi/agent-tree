@@ -11,5 +11,10 @@
   "repository": "https://github.com/behnamazimi/agent-tree",
   "license": "MIT",
   "keywords": ["agent-tree", "claude-code", "subagents", "graph", "sessions", "mod"],
+  "icon": "./icon.png",
+  "documentationUrl": "https://github.com/behnamazimi/agent-tree#readme",
+  "supportUrl": "https://github.com/behnamazimi/agent-tree/issues",
+  "privacyPolicyUrl": "https://github.com/behnamazimi/agent-tree/blob/main/PRIVACY.md",
+  "termsOfServiceUrl": "https://github.com/behnamazimi/agent-tree/blob/main/LICENSE",
   "types": "./types/index.d.ts"
 }
