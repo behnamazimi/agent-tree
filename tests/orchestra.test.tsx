@@ -212,7 +212,7 @@ test("summary and totals count the whole session", () => {
     waitMs: 62_000,
     now: 0,
   };
-  expect(summarize(graph)).toBe("orchestra · 2 nodes · 1 running · 1 needs you");
+  expect(summarize(graph)).toBe("2 nodes · 1 running · 1 needs you");
   expect(totals(graph)).toBe(
     "2 agents · 1 running · 1 failed · 8 calls · $1.50 · waited on you 1m02",
   );
@@ -333,6 +333,18 @@ test("the band keeps the band another plugin draws beneath it", async ($, on) =>
     expect(await band.find({ type: "Text", text: "other plugin" })).toBeDefined();
     await band.unmount();
   }
+});
+
+test("the band stays hidden until the session has an agent", async ($, on) => {
+  const clock = mock.clock(on);
+  engine(on, [], "other plugin");
+  await $.session.start({ cwd: "/", surface: "desktop", isInteractive: true });
+  await clock.advance(1100);
+
+  const band = await $.ui.mount({ ...BAND, surface: "desktop" });
+  expect(await band.find({ key: "toggle" })).toBeUndefined();
+  expect(await band.find({ type: "Text", text: "other plugin" })).toBeDefined();
+  await band.unmount();
 });
 
 test("the band switch turns orchestra off for the session and the pane says so", async ($, on) => {

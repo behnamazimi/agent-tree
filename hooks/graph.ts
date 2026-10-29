@@ -228,7 +228,7 @@ export function summarize(graph: OrchestraGraph): string {
   const agents = graph.nodes.filter((n) => n.kind !== "main");
   const running = agents.filter((n) => n.status === "run").length;
   const waiting = graph.nodes.filter((n) => n.status === "wait").length;
-  const parts = [`orchestra · ${plural(agents.length, "node")}`, `${running} running`];
+  const parts = [plural(agents.length, "node"), `${running} running`];
   if (waiting > 0) {
     parts.push(`${waiting} needs you`);
   }

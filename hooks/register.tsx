@@ -314,9 +314,13 @@ export const register: Register = (on) => {
     if (e.props.hasSurvey) {
       return beneath;
     }
+    const graph = await read($, graphAtom);
+    // Nothing to orchestrate until the session starts an agent or side session.
+    if (!graph.nodes.some((n) => n.kind !== "main")) {
+      return beneath;
+    }
     const { Box, Button, Text } = $.ui.resolve(e);
     const isEnabled = await read($, isOnAtom);
-    const graph = await read($, graphAtom);
     // The band's one jump: the first agent that is waiting on the person.
     const waiting = isEnabled
       ? graph.nodes.find((n) => n.kind === "agent" && n.status === "wait")
@@ -327,7 +331,7 @@ export const register: Register = (on) => {
         <Text color={isEnabled ? statusColor(graph) : undefined} dimColor={!isEnabled}>
           ●
         </Text>
-        <Text dimColor>{isEnabled ? summarize(graph) : "orchestra off for this session"}</Text>
+        <Text dimColor>{isEnabled ? summarize(graph) : "off for this session"}</Text>
         {...waiting
           ? [
               <Button
