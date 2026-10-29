@@ -39,21 +39,3 @@ https://github.com/user-attachments/assets/44ef8b02-0e60-4137-b985-e88accf5466a
 claude plugin marketplace add behnamazimi/agent-tree
 claude plugin install agent-tree@behnamazimi-plugins
 ```
-
-Or in one step (Claude Code 2.1.275+): `/plugin install agent-tree --marketplace behnamazimi/agent-tree`
-
-## Try it
-
-Load it from this folder for one session:
-
-```bash
-claude --plugin-dir /path/to/agent-tree
-```
-
-Claude Code reloads the mod each time you save a file in the folder.
-
-For sessions the desktop app starts, where you can't pass a flag, add the folder to `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json`:
-
-```json
-{ "env": { "CLAUDE_CODE_PLUGIN_DIRS": "/path/to/agent-tree" } }
-```
