@@ -1,0 +1,7 @@
+{
+  "name": "behnamazimi-plugins",
+  "owner": { "name": "Behnam Azimi" },
+  "plugins": [
+    { "name": "orchestra", "source": "./" }
+  ]
+}

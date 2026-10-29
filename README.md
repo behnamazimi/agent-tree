@@ -33,6 +33,15 @@ https://github.com/user-attachments/assets/44ef8b02-0e60-4137-b985-e88accf5466a
 > [!TIP]
 > The desktop app has a single conversation view, so `open <agent>` cannot switch to a subagent there. It prints that agent's task, latest action and result instead.
 
+## Install
+
+```bash
+claude plugin marketplace add behnamazimi/orchestra
+claude plugin install orchestra@behnamazimi-plugins
+```
+
+Or in one step (Claude Code 2.1.275+): `/plugin install orchestra --marketplace behnamazimi/orchestra`
+
 ## Try it
 
 Load it from this folder for one session:
