@@ -1,9 +1,12 @@
 {
   "name": "agent-tree",
   "displayName": "Agent tree",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Live module graph of this session's subagents and side sessions, with a per-session switch above the prompt",
-  "author": { "name": "Behnam Azimi", "url": "https://github.com/behnamazimi" },
+  "author": {
+    "name": "Behnam Azimi",
+    "url": "https://github.com/behnamazimi"
+  },
   "homepage": "https://github.com/behnamazimi/agent-tree#readme",
   "repository": "https://github.com/behnamazimi/agent-tree",
   "license": "MIT",
