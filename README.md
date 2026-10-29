@@ -1,19 +1,19 @@
-# orchestra
+# agent-tree
 
 **See every agent your Claude Code session is running, live, in one place.**
 
-When Claude splits a task across subagents and side sessions, the work goes out of view: a few lines saying "agent launched", then you wait. Orchestra is a Claude Code mod that keeps those agents on screen as a live tree. It shows who started whom, what each one is doing right now, what it costs, and which one is waiting on you.
+When Claude splits a task across subagents and side sessions, the work goes out of view: a few lines saying "agent launched", then you wait. Agent tree is a Claude Code mod that keeps those agents on screen as a live tree. It shows who started whom, what each one is doing right now, what it costs, and which one is waiting on you.
 
 https://github.com/user-attachments/assets/44ef8b02-0e60-4137-b985-e88accf5466a
 
 ## Commands
 
 ```text
-/orchestra               open the pane
-/orchestra on | off      record this session or stop recording it
-/orchestra all           show or hide folded finished agents
-/orchestra open <agent>  jump to an agent's conversation (id prefix, part of its name, or main)
-/orchestra export        copy a Markdown outline of the whole tree
+/agent-tree               open the pane
+/agent-tree on | off      record this session or stop recording it
+/agent-tree all           show or hide folded finished agents
+/agent-tree open <agent>  jump to an agent's conversation (id prefix, part of its name, or main)
+/agent-tree export        copy a Markdown outline of the whole tree
 ```
 
 `export` copies something you can paste into a PR or a standup note:
@@ -36,18 +36,18 @@ https://github.com/user-attachments/assets/44ef8b02-0e60-4137-b985-e88accf5466a
 ## Install
 
 ```bash
-claude plugin marketplace add behnamazimi/orchestra
-claude plugin install orchestra@behnamazimi-plugins
+claude plugin marketplace add behnamazimi/agent-tree
+claude plugin install agent-tree@behnamazimi-plugins
 ```
 
-Or in one step (Claude Code 2.1.275+): `/plugin install orchestra --marketplace behnamazimi/orchestra`
+Or in one step (Claude Code 2.1.275+): `/plugin install agent-tree --marketplace behnamazimi/agent-tree`
 
 ## Try it
 
 Load it from this folder for one session:
 
 ```bash
-claude --plugin-dir /path/to/orchestra
+claude --plugin-dir /path/to/agent-tree
 ```
 
 Claude Code reloads the mod each time you save a file in the folder.
@@ -55,5 +55,5 @@ Claude Code reloads the mod each time you save a file in the folder.
 For sessions the desktop app starts, where you can't pass a flag, add the folder to `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json`:
 
 ```json
-{ "env": { "CLAUDE_CODE_PLUGIN_DIRS": "/path/to/orchestra" } }
+{ "env": { "CLAUDE_CODE_PLUGIN_DIRS": "/path/to/agent-tree" } }
 ```

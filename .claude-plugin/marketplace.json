@@ -1,7 +1,14 @@
 {
   "name": "behnamazimi-plugins",
   "owner": { "name": "Behnam Azimi" },
+  "description": "Claude Code plugins by Behnam Azimi",
   "plugins": [
-    { "name": "orchestra", "source": "./" }
+    {
+      "name": "agent-tree",
+      "source": "./",
+      "description": "Live tree of this session's subagents and side sessions: who started whom, what each is doing, what it costs, and which one is waiting on you",
+      "category": "observability",
+      "tags": ["subagents", "agent-tree", "graph", "sessions"]
+    }
   ]
 }

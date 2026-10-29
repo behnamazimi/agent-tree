@@ -21,14 +21,14 @@ import {
   TILE_W,
   totals,
 } from "../hooks/graph";
-import type { OrchestraGraph, OrchestraHistory, OrchestraNode } from "../types";
+import type { AgentTreeGraph, AgentTreeHistory, AgentTreeNode } from "../types";
 
 const node = (
   id: string,
   parentId: string | null,
-  status: OrchestraNode["status"],
-  extra: Partial<OrchestraNode> = {},
-): OrchestraNode => ({
+  status: AgentTreeNode["status"],
+  extra: Partial<AgentTreeNode> = {},
+): AgentTreeNode => ({
   id,
   parentId,
   kind: parentId === null ? "main" : "agent",
@@ -41,7 +41,7 @@ const node = (
 });
 
 const BAND = {
-  plugin: "orchestra",
+  plugin: "agent-tree",
   component: "AbovePrompt",
   requestId: "band",
   props: {
@@ -55,11 +55,11 @@ const BAND = {
 } as const;
 
 const PANE = {
-  plugin: "orchestra",
+  plugin: "agent-tree",
   component: "Pane",
-  requestId: "orchestra",
+  requestId: "agent-tree",
   props: {
-    title: "Orchestra",
+    title: "Agent tree",
     isFocused: false,
     bodyColumns: 120,
     placement: "dock",
@@ -76,7 +76,7 @@ const baseAgents: AgentInfo[] = [
   { id: "a3", description: "Nested scan", type: "Explore", status: "waiting", parentId: "a2" },
 ];
 
-/** Stands for the engine; `beneath` is what another plugin's band under orchestra draws. */
+/** Stands for the engine; `beneath` is what another plugin's band under agent-tree draws. */
 function engine(
   on: On,
   agents: AgentInfo[] = baseAgents,
@@ -103,7 +103,7 @@ function engine(
 
     return beneath ? <Text>{beneath}</Text> : <Box />;
   });
-  on("command.register", () => ({ value: { command: "orchestra" } }));
+  on("command.register", () => ({ value: { command: "agent-tree" } }));
   on("ui.open", () => ({ value: { isPlaced: true } }));
   on("ui.view", (_, e) => {
     viewed.push(e);
@@ -131,7 +131,7 @@ const askFromA3 = ($: Parameters<TestBody>[0]) =>
 
 const run = ($: Parameters<TestBody>[0], args: string) =>
   $.command.run({
-    command: "orchestra",
+    command: "agent-tree",
     args,
     origin: { kind: "composer" },
     presentation: { isFullscreen: false, columns: 80 },
@@ -148,7 +148,7 @@ test("an action reads as the tool and its main argument", () => {
 });
 
 test("flags call out repeats, slow runs and files two agents edited", () => {
-  const graph: OrchestraGraph = {
+  const graph: AgentTreeGraph = {
     nodes: [
       node("main", null, "run"),
       node("fast", "main", "done", { endedAt: 30_000 }),
@@ -160,13 +160,13 @@ test("flags call out repeats, slow runs and files two agents edited", () => {
     ],
     now: 0,
   };
-  const slow = graph.nodes[2] as OrchestraNode;
+  const slow = graph.nodes[2] as AgentTreeNode;
   expect(flags(slow, graph, 120_000)).toEqual(["same Grep ×6", "5× slower", "shared file a.ts"]);
-  expect(flags(graph.nodes[1] as OrchestraNode, graph, 120_000)).toEqual([]);
+  expect(flags(graph.nodes[1] as AgentTreeNode, graph, 120_000)).toEqual([]);
 });
 
 test("flags call out a quiet run and a cost far above its siblings", () => {
-  const graph: OrchestraGraph = {
+  const graph: AgentTreeGraph = {
     nodes: [
       node("main", null, "run"),
       node("a", "main", "run", { lastAt: 0, costUsd: 1.5 }),
@@ -175,11 +175,11 @@ test("flags call out a quiet run and a cost far above its siblings", () => {
     ],
     now: 0,
   };
-  expect(flags(graph.nodes[1] as OrchestraNode, graph, 200_000)).toEqual(["quiet 3m20", "cost 6×"]);
+  expect(flags(graph.nodes[1] as AgentTreeNode, graph, 200_000)).toEqual(["quiet 3m20", "cost 6×"]);
 });
 
 test("totals names the top spender, and outline nests children under parents", () => {
-  const graph: OrchestraGraph = {
+  const graph: AgentTreeGraph = {
     nodes: [
       node("main", null, "run"),
       node("a", "main", "run", { costUsd: 0.9 }),
@@ -189,7 +189,7 @@ test("totals names the top spender, and outline nests children under parents", (
     now: 0,
   };
   expect(totals(graph)).toContain("top a 60%");
-  const tree: OrchestraGraph = {
+  const tree: AgentTreeGraph = {
     nodes: [
       node("main", null, "run"),
       node("a", "main", "done", { calls: 2, endedAt: 30_000, result: "Found 3" }),
@@ -222,7 +222,7 @@ test("the note says what a node waits on, does, or found", () => {
 });
 
 test("summary and totals count the whole session", () => {
-  const graph: OrchestraGraph = {
+  const graph: AgentTreeGraph = {
     nodes: [
       { ...node("main", null, "wait"), calls: 2 },
       { ...node("a", "main", "run"), calls: 5 },
@@ -394,7 +394,7 @@ test("the svg fits the pane width and keeps its proportions", async ($, on) => {
   await narrow.unmount();
 });
 
-test("finished agents show by default; /orchestra all folds them past six", async ($, on) => {
+test("finished agents show by default; /agent-tree all folds them past six", async ($, on) => {
   const clock = mock.clock(on);
   const many: AgentInfo[] = Array.from({ length: 7 }, (_, i) => ({
     id: `d${i}`,
@@ -464,7 +464,7 @@ test("the band stays hidden until the session has an agent", async ($, on) => {
   await band.unmount();
 });
 
-test("the band switch turns orchestra off for the session and the pane says so", async ($, on) => {
+test("the band switch turns agent-tree off for the session and the pane says so", async ($, on) => {
   const clock = mock.clock(on);
   engine(on);
   await $.session.start({ cwd: "/", surface: "desktop", isInteractive: true });
@@ -485,22 +485,24 @@ test("the band switch turns orchestra off for the session and the pane says so",
   await pane.unmount();
 });
 
-test("/orchestra answers on, off, view, open and bad input", async ($, on) => {
+test("/agent-tree answers on, off, view, open and bad input", async ($, on) => {
   mock.clock(on);
   const { viewed } = engine(on);
   await $.session.start({ cwd: "/", surface: "terminal", isInteractive: true });
   await run($, "");
 
-  expect((await run($, "off")).text).toBe("Orchestra is off for this session.");
-  expect((await run($, "on")).text).toBe("Orchestra is on for this session.");
-  expect((await run($, "")).text).toBe("Orchestra view opened.");
+  expect((await run($, "off")).text).toBe("Agent tree is off for this session.");
+  expect((await run($, "on")).text).toBe("Agent tree is on for this session.");
+  expect((await run($, "")).text).toBe("Agent tree view opened.");
   expect((await run($, "open nested")).text).toBe("Showing Nested scan.");
   expect((await run($, "open a2")).text).toBe("Showing Search the repo.");
   expect((await run($, "open main")).text).toBe("Showing this session.");
   expect((await run($, "open nobody")).text).toBe(
     'No agent matches "nobody". Hover a card to see its id.',
   );
-  expect((await run($, "nope")).text).toBe("Usage: /orchestra on|off|view|all|open <agent>|export");
+  expect((await run($, "nope")).text).toBe(
+    "Usage: /agent-tree on|off|view|all|open <agent>|export",
+  );
   expect(viewed).toEqual([{ agentId: "a3" }, { agentId: "a2" }, {}]);
 });
 
@@ -559,12 +561,12 @@ for (const surface of SURFACES) {
     expect(copied[0]).toMatch(/^3 agents/);
     expect(copied[0]).toContain("- **this session**");
     expect(copied[0]).toContain("    - **Nested scan**");
-    expect(toasts).toEqual(["Orchestra overview copied"]);
+    expect(toasts).toEqual(["Agent tree overview copied"]);
     await pane.unmount();
   });
 }
 
-test("/orchestra export copies an outline with nested agents indented", async ($, on) => {
+test("/agent-tree export copies an outline with nested agents indented", async ($, on) => {
   const clock = mock.clock(on);
   engine(on);
   const copied: string[] = [];
@@ -576,19 +578,19 @@ test("/orchestra export copies an outline with nested agents indented", async ($
   await $.session.start({ cwd: "/", surface: "terminal", isInteractive: true });
   await clock.advance(1100);
 
-  expect((await run($, "export")).text).toBe("Orchestra overview copied.");
+  expect((await run($, "export")).text).toBe("Agent tree overview copied.");
   expect(copied[0]).toContain("- **this session**");
   expect(copied[0]).toContain("  - **Search the repo**");
   expect(copied[0]).toContain("    - **Nested scan**");
 });
 
-test("/orchestra open says why where the app cannot switch views", async ($, on) => {
+test("/agent-tree open says why where the app cannot switch views", async ($, on) => {
   const clock = mock.clock(on);
   engine(on, baseAgents, "", { viewDeny: "no main view here" });
   await $.session.start({ cwd: "/", surface: "desktop", isInteractive: true });
   await clock.advance(1100);
 
-  expect((await run($, "open")).text).toBe("Usage: /orchestra open <agent id or name>, or main");
+  expect((await run($, "open")).text).toBe("Usage: /agent-tree open <agent id or name>, or main");
   expect((await run($, "open main")).text).toBe(
     "You're already in this session (no main view here).",
   );
@@ -624,7 +626,7 @@ test("an agent's result is its final answer, not the launch notice", async ($, o
 });
 
 test("animations resume at the same phase after a redraw", () => {
-  const graph: OrchestraGraph = {
+  const graph: AgentTreeGraph = {
     nodes: [node("main", null, "run"), node("a", "main", "run")],
     now: 0,
   };
@@ -694,10 +696,10 @@ test("counts redraw at most every ten seconds; a status change redraws at once",
 test("history is saved to session state as it changes", async ($, on) => {
   const clock = mock.clock(on);
   engine(on);
-  const saved: OrchestraHistory[] = [];
+  const saved: AgentTreeHistory[] = [];
   on("state.set", (_, e, next) => {
     if (e.key === "history" && e.value) {
-      saved.push(e.value as OrchestraHistory);
+      saved.push(e.value as AgentTreeHistory);
     }
 
     return next(e);
@@ -757,7 +759,7 @@ test("a resumed conversation gets its history back from the store, and old ones 
 });
 
 test("the layout keeps a row between tiles and wires every child to its parent", () => {
-  const graph: OrchestraGraph = {
+  const graph: AgentTreeGraph = {
     nodes: [
       node("main", null, "run"),
       node("a", "main", "run"),
@@ -798,7 +800,7 @@ test("each request gets the growth of the session total since the last one", () 
 });
 
 test("a tile shows dollars when known, else tokens", () => {
-  const graph: OrchestraGraph = { nodes: [], now: 30_000 };
+  const graph: AgentTreeGraph = { nodes: [], now: 30_000 };
   expect(spend(node("a", "main", "run", { costUsd: 0.123 }))).toBe("$0.12");
   expect(spend(node("a", "main", "run", { costUsd: 0.004 }))).toBe("<$0.01");
   expect(spend(node("a", "main", "run", { tokens: 41_200 }))).toBe("41k tok");
@@ -857,7 +859,7 @@ test("a held agent waits on its own work, and only a named prompt means you", as
 });
 
 test("wires start their particles mid-path and end in a level, fixed-size arrow", () => {
-  const graph: OrchestraGraph = {
+  const graph: AgentTreeGraph = {
     nodes: [node("main", null, "run"), node("a", "main", "wait")],
     now: 0,
   };

@@ -1,4 +1,4 @@
-import type { OrchestraGraph, OrchestraNode, OrchestraStatus } from "../types";
+import type { AgentTreeGraph, AgentTreeNode, AgentTreeStatus } from "../types";
 
 export const FOLD_AFTER = 6;
 const REPEAT_FLAG = 4;
@@ -9,7 +9,7 @@ const COST_FACTOR = 3;
 const COST_MIN_USD = 0.25;
 
 /** Theme keys, so both surfaces draw them in the person's light or dark theme. */
-export const STATUS_COLOR: Record<OrchestraStatus, string> = {
+export const STATUS_COLOR: Record<AgentTreeStatus, string> = {
   run: "success",
   wait: "warning",
   hold: "suggestion",
@@ -19,7 +19,7 @@ export const STATUS_COLOR: Record<OrchestraStatus, string> = {
 };
 
 /** Still working: running, held on its own work, or waiting on the person. */
-export function isLive(status: OrchestraStatus): boolean {
+export function isLive(status: AgentTreeStatus): boolean {
   return status === "run" || status === "wait" || status === "hold";
 }
 
@@ -68,7 +68,7 @@ export function attributeCost(
 }
 
 /** Dollars when known, else tokens; undefined when the node has used neither. */
-export function spend(n: OrchestraNode): string | undefined {
+export function spend(n: AgentTreeNode): string | undefined {
   if (n.costUsd !== undefined && n.costUsd > 0) {
     return n.costUsd < 0.01 ? "<$0.01" : `$${n.costUsd.toFixed(2)}`;
   }
@@ -90,9 +90,9 @@ export function editedFile(tool: string, input: Record<string, unknown>): string
 }
 
 /** Children per parent id, orphans under the root. */
-export function childrenOf(nodes: OrchestraNode[]): Map<string | null, OrchestraNode[]> {
+export function childrenOf(nodes: AgentTreeNode[]): Map<string | null, AgentTreeNode[]> {
   const ids = new Set(nodes.map((n) => n.id));
-  const children = new Map<string | null, OrchestraNode[]>();
+  const children = new Map<string | null, AgentTreeNode[]>();
   for (const n of nodes) {
     const parent = n.parentId !== null && ids.has(n.parentId) ? n.parentId : null;
     children.set(parent, [...(children.get(parent) ?? []), n]);
@@ -106,9 +106,9 @@ export function childrenOf(nodes: OrchestraNode[]): Map<string | null, Orchestra
  * past FOLD_AFTER finished ones, the finished ones fold (unless the fold is open).
  */
 export function fold(
-  kids: OrchestraNode[],
+  kids: AgentTreeNode[],
   isOpen: boolean,
-): { shown: OrchestraNode[]; folded: OrchestraNode[] } {
+): { shown: AgentTreeNode[]; folded: AgentTreeNode[] } {
   const finished = kids.filter((n) => n.status === "done");
   if (isOpen || finished.length <= FOLD_AFTER) {
     return { shown: kids, folded: [] };
@@ -118,7 +118,7 @@ export function fold(
 }
 
 /** Short warnings worth a glance; empty when the node looks normal. */
-export function flags(n: OrchestraNode, graph: OrchestraGraph, now: number): string[] {
+export function flags(n: AgentTreeNode, graph: AgentTreeGraph, now: number): string[] {
   const out: string[] = [];
   const siblings = graph.nodes.filter(
     (o) => o !== n && o.parentId === n.parentId && o.kind === "agent",
@@ -170,7 +170,7 @@ export function flags(n: OrchestraNode, graph: OrchestraGraph, now: number): str
 }
 
 /** The tile's last line: what it waits on, what it is doing, or what it found. */
-export function note(n: OrchestraNode): string {
+export function note(n: AgentTreeNode): string {
   if (n.status === "wait") {
     return `needs you${n.action ? `: ${n.action}` : ""}`;
   }
@@ -191,7 +191,7 @@ export function note(n: OrchestraNode): string {
 }
 
 /** The tile's middle line: model, type, calls and how long it has run. */
-export function meta(n: OrchestraNode, graph: OrchestraGraph, now: number): string {
+export function meta(n: AgentTreeNode, graph: AgentTreeGraph, now: number): string {
   if (n.kind === "main") {
     return [
       n.model?.replace(/^claude-/, ""),
@@ -214,7 +214,7 @@ export function meta(n: OrchestraNode, graph: OrchestraGraph, now: number): stri
 }
 
 /** The band's dot: amber while anything waits on you, green while anything runs. */
-export function statusColor(graph: OrchestraGraph): string {
+export function statusColor(graph: AgentTreeGraph): string {
   const statuses = new Set(graph.nodes.map((n) => n.status));
 
   return statuses.has("wait")
@@ -224,7 +224,7 @@ export function statusColor(graph: OrchestraGraph): string {
       : STATUS_COLOR.done;
 }
 
-export function summarize(graph: OrchestraGraph): string {
+export function summarize(graph: AgentTreeGraph): string {
   const agents = graph.nodes.filter((n) => n.kind !== "main");
   const running = agents.filter((n) => n.status === "run").length;
   const waiting = graph.nodes.filter((n) => n.status === "wait").length;
@@ -236,8 +236,8 @@ export function summarize(graph: OrchestraGraph): string {
   return parts.join(" · ");
 }
 
-const STATUS_ORDER: OrchestraStatus[] = ["wait", "run", "hold", "idle", "done", "fail"];
-const STATUS_LABEL: Record<OrchestraStatus, string> = {
+const STATUS_ORDER: AgentTreeStatus[] = ["wait", "run", "hold", "idle", "done", "fail"];
+const STATUS_LABEL: Record<AgentTreeStatus, string> = {
   wait: "need you",
   run: "running",
   hold: "held",
@@ -247,7 +247,7 @@ const STATUS_LABEL: Record<OrchestraStatus, string> = {
 };
 
 /** A node's labelled details, as its hover card shows them; empty ones left out. */
-export function detailLines(n: OrchestraNode, now: number): [string, string][] {
+export function detailLines(n: AgentTreeNode, now: number): [string, string][] {
   return [
     ["Task", n.task],
     [n.status === "wait" ? "Waiting on" : "Now", n.status === "done" ? undefined : n.action],
@@ -261,7 +261,7 @@ export function detailLines(n: OrchestraNode, now: number): [string, string][] {
 }
 
 /** A node as text, for where its conversation cannot be shown. */
-export function report(n: OrchestraNode, now: number): string {
+export function report(n: AgentTreeNode, now: number): string {
   const head = [STATUS_LABEL[n.status], n.model?.replace(/^claude-/, ""), spend(n)]
     .filter(Boolean)
     .join(" · ");
@@ -273,7 +273,7 @@ export function report(n: OrchestraNode, now: number): string {
 }
 
 /** The pane header's pieces: agent count, per-status counts, and the session's figures. */
-export function headline(graph: OrchestraGraph) {
+export function headline(graph: AgentTreeGraph) {
   const agents = graph.nodes.filter((n) => n.kind !== "main");
   const counts = STATUS_ORDER.map(
     (s) => [s, agents.filter((n) => n.status === s).length] as const,
@@ -309,7 +309,7 @@ export function headline(graph: OrchestraGraph) {
 }
 
 /** One line of everything the session has done so far, for the clipboard and the pane's alt text. */
-export function totals(graph: OrchestraGraph): string {
+export function totals(graph: AgentTreeGraph): string {
   const h = headline(graph);
 
   return [
@@ -324,10 +324,10 @@ export function totals(graph: OrchestraGraph): string {
 }
 
 /** The graph as a markdown outline, children under their parent, for pasting into a PR or chat. */
-export function outline(graph: OrchestraGraph): string {
+export function outline(graph: AgentTreeGraph): string {
   const kids = childrenOf(graph.nodes);
   const lines: string[] = [];
-  const visit = (n: OrchestraNode, depth: number) => {
+  const visit = (n: AgentTreeNode, depth: number) => {
     const detail = [
       n.status,
       n.model?.replace(/^claude-/, ""),
@@ -351,8 +351,8 @@ export function outline(graph: OrchestraGraph): string {
   return lines.join("\n");
 }
 
-/** The session's totals line above its outline: what the Copy button and /orchestra export put on the clipboard. */
-export function overview(graph: OrchestraGraph): string {
+/** The session's totals line above its outline: what the Copy button and /agent-tree export put on the clipboard. */
+export function overview(graph: AgentTreeGraph): string {
   return `${totals(graph)}\n\n${outline(graph)}`;
 }
 
@@ -399,17 +399,17 @@ const ROW_GAP = 1;
 const COL_GAP = 8;
 const ANCHOR = 2;
 
-export type PlacedTile = { node: OrchestraNode; x: number; y: number };
+export type PlacedTile = { node: AgentTreeNode; x: number; y: number };
 
 export type TimelineRow = {
   label: string;
-  status: OrchestraStatus;
+  status: AgentTreeStatus;
   startedAt: number;
   endedAt?: number;
 };
 
 /** One bar per drawn card, and one per fold spanning the agents folded into it. */
-export function timelineRows(graph: OrchestraGraph, tiles: PlacedTile[]): TimelineRow[] {
+export function timelineRows(graph: AgentTreeGraph, tiles: PlacedTile[]): TimelineRow[] {
   const shown = new Set(tiles.map((t) => t.node.id));
   const rows: TimelineRow[] = graph.nodes.filter((n) => shown.has(n.id));
   const folded = graph.nodes.filter((n) => !shown.has(n.id));
@@ -459,7 +459,7 @@ export type TreeLayout = {
   height: number;
 };
 /** A placed box as an edge end: a tile or a fold, with its size. */
-export type EdgeEnd = { x: number; y: number; h: number; isFold: boolean; status: OrchestraStatus };
+export type EdgeEnd = { x: number; y: number; h: number; isFold: boolean; status: AgentTreeStatus };
 export type TreeEdge = { from: EdgeEnd; to: EdgeEnd };
 /** The box sizes a layout places with: character cells for the terminal, pixels for the SVG. */
 export type LayoutDims = {
@@ -479,7 +479,7 @@ export const CELL_DIMS: LayoutDims = {
 };
 
 type Slot =
-  | { kind: "tile"; node: OrchestraNode }
+  | { kind: "tile"; node: AgentTreeNode }
   | { kind: "fold"; parentId: string; count: number };
 
 const N = 1;
@@ -503,7 +503,7 @@ const BOX: Record<number, string> = {
   [E | W | N]: "┴",
   [N | E | S | W]: "┼",
 };
-const RANK: Record<OrchestraStatus, number> = {
+const RANK: Record<AgentTreeStatus, number> = {
   done: 0,
   idle: 1,
   hold: 2,
@@ -519,7 +519,7 @@ const RANK: Record<OrchestraStatus, number> = {
  * honours for size and offset; given pixel dims it places the SVG's cards.
  */
 export function layoutTree(
-  graph: OrchestraGraph,
+  graph: AgentTreeGraph,
   isFoldOpen: boolean,
   dims: LayoutDims = CELL_DIMS,
 ): TreeLayout {
@@ -582,10 +582,10 @@ export function layoutTree(
 }
 
 function wireCells(edges: TreeEdge[]): WireCell[] {
-  const mask = new Map<string, { bits: number; status: OrchestraStatus }>();
+  const mask = new Map<string, { bits: number; status: AgentTreeStatus }>();
   const order = new Map<string, { path: number; step: number }>();
   const arrows: WireCell[] = [];
-  const link = (x: number, y: number, bits: number, status: OrchestraStatus) => {
+  const link = (x: number, y: number, bits: number, status: AgentTreeStatus) => {
     const k = `${x},${y}`;
     const old = mask.get(k);
     mask.set(k, {

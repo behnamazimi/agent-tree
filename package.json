@@ -1,11 +1,12 @@
 {
-  "name": "orchestra",
+  "name": "agent-tree",
   "private": true,
   "type": "module",
   "scripts": {
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "fmt:check": "oxfmt --check"
+    "fmt:check": "oxfmt --check",
+    "release": "node scripts/release.ts"
   },
   "devDependencies": {
     "oxfmt": "^0.74.0",

@@ -1,12 +1,12 @@
 {
-  "name": "orchestra",
-  "displayName": "Orchestra",
+  "name": "agent-tree",
+  "displayName": "Agent tree",
   "version": "0.1.0",
   "description": "Live module graph of this session's subagents and side sessions, with a per-session switch above the prompt",
   "author": { "name": "Behnam Azimi", "url": "https://github.com/behnamazimi" },
-  "homepage": "https://github.com/behnamazimi/orchestra#readme",
-  "repository": "https://github.com/behnamazimi/orchestra",
+  "homepage": "https://github.com/behnamazimi/agent-tree#readme",
+  "repository": "https://github.com/behnamazimi/agent-tree",
   "license": "MIT",
-  "keywords": ["subagents", "graph", "sessions", "mod"],
+  "keywords": ["agent-tree", "claude-code", "subagents", "graph", "sessions", "mod"],
   "types": "./types/index.d.ts"
 }

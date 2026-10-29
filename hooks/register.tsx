@@ -1,7 +1,7 @@
 import { atom, read, update } from "claude-code";
 import type { AgentInfo, EngineInterface, Register, Timer } from "claude-code";
 
-import type { OrchestraGraph, OrchestraHistory, OrchestraNode, OrchestraStatus } from "../types";
+import type { AgentTreeGraph, AgentTreeHistory, AgentTreeNode, AgentTreeStatus } from "../types";
 import {
   age,
   attributeCost,
@@ -32,7 +32,7 @@ import {
 import type { PlacedFold, PlacedTile } from "./graph";
 import { renderBarSvg, renderGraphSvg, svgSize } from "./svg";
 
-const PANE = "orchestra";
+const PANE = "agent-tree";
 const MAIN = "main";
 const TICK_MS = 1000;
 const START_SESSION_TOOL = "mcp__ccd_session__start_session";
@@ -52,22 +52,22 @@ const HISTORY_PREFIX = "history:";
 // Each history is capped by AGENT_CAP; a few fit well under the store's 4 MiB.
 const HISTORIES_KEPT = 8;
 
-const isOnAtom = atom({ plugin: "orchestra", key: "isOn" } as const, true);
+const isOnAtom = atom({ plugin: "agent-tree", key: "isOn" } as const, true);
 const graphAtom = atom(
-  { plugin: "orchestra", key: "graph" } as const,
+  { plugin: "agent-tree", key: "graph" } as const,
   {
     nodes: [],
     now: 0,
-  } as OrchestraGraph,
+  } as AgentTreeGraph,
 );
 const historyAtom = atom(
-  { plugin: "orchestra", key: "history" } as const,
-  null as OrchestraHistory | null,
+  { plugin: "agent-tree", key: "history" } as const,
+  null as AgentTreeHistory | null,
 );
-const nowAtom = atom({ plugin: "orchestra", key: "now" } as const, 0);
-const foldAtom = atom({ plugin: "orchestra", key: "isFoldOpen" } as const, true);
+const nowAtom = atom({ plugin: "agent-tree", key: "now" } as const, 0);
+const foldAtom = atom({ plugin: "agent-tree", key: "isFoldOpen" } as const, true);
 
-const AGENT_STATUS: Record<AgentInfo["status"], OrchestraStatus> = {
+const AGENT_STATUS: Record<AgentInfo["status"], AgentTreeStatus> = {
   pending: "run",
   running: "run",
   waiting: "hold",
@@ -77,7 +77,7 @@ const AGENT_STATUS: Record<AgentInfo["status"], OrchestraStatus> = {
   killed: "fail",
 };
 
-const emptyHistory = (now: number): OrchestraHistory => ({
+const emptyHistory = (now: number): AgentTreeHistory => ({
   sessionStartedAt: now,
   waitMs: 0,
   peak: 0,
@@ -105,7 +105,7 @@ const live = {
   /** How many nodes waited on the person at the last refresh; the status and toast fire on its changes. */
   waitCount: 0,
   timer: undefined as Timer | undefined,
-  mainStatus: "idle" as OrchestraStatus,
+  mainStatus: "idle" as AgentTreeStatus,
   waitingSince: undefined as number | undefined,
   ctxPercent: undefined as number | undefined,
   costUsd: undefined as number | undefined,
@@ -122,9 +122,9 @@ const live = {
 export const register: Register = (on) => {
   on("session.start", async ($, e, next) => {
     await $.command.register({
-      name: "orchestra",
+      name: "agent-tree",
       description:
-        "Orchestra view for this session: on, off, view, all (fold or unfold finished agents), open <agent>, or export (copy the overview)",
+        "Agent tree view for this session: on, off, view, all (fold or unfold finished agents), open <agent>, or export (copy the overview)",
       argumentHint: "on|off|view|all|open <agent>|export",
     });
     live.storeKey = await historyKey($);
@@ -142,13 +142,13 @@ export const register: Register = (on) => {
     return next(e);
   });
 
-  on("command.run", { command: "orchestra" }, async ($, e) => {
+  on("command.run", { command: "agent-tree" }, async ($, e) => {
     const [verb = "", ...rest] = e.args.trim().split(/\s+/);
     const arg = verb.toLowerCase();
     if (arg === "on" || arg === "off") {
       await setOn($, arg === "on");
 
-      return { text: `Orchestra is ${arg} for this session.` };
+      return { text: `Agent tree is ${arg} for this session.` };
     }
     if (arg === "all") {
       const isOpen = !(await read($, foldAtom));
@@ -157,7 +157,7 @@ export const register: Register = (on) => {
       return { text: isOpen ? "Showing every finished agent." : "Folding finished agents again." };
     }
     if (arg === "open" && rest.length === 0) {
-      return { text: "Usage: /orchestra open <agent id or name>, or main" };
+      return { text: "Usage: /agent-tree open <agent id or name>, or main" };
     }
     if (arg === "open") {
       // A command is the person's own input, so it may switch the main view.
@@ -176,7 +176,7 @@ export const register: Register = (on) => {
         return { text: `You're already in this session (${moved.deny}).` };
       }
 
-      // Its conversation cannot be shown here, so show what orchestra knows of it instead.
+      // Its conversation cannot be shown here, so show what agent-tree knows of it instead.
       return {
         text: `${report(target, await $.clock.now())}\n\nThis app can't switch to its conversation (${moved.deny}).`,
       };
@@ -185,18 +185,20 @@ export const register: Register = (on) => {
       const copied = await $.ui.copy({ text: overview(await read($, graphAtom)) });
 
       return {
-        text: copied.isCopied ? "Orchestra overview copied." : `Could not copy (${copied.reason}).`,
+        text: copied.isCopied
+          ? "Agent tree overview copied."
+          : `Could not copy (${copied.reason}).`,
       };
     }
     if (arg !== "" && arg !== "view") {
-      return { text: "Usage: /orchestra on|off|view|all|open <agent>|export" };
+      return { text: "Usage: /agent-tree on|off|view|all|open <agent>|export" };
     }
-    const opened = await $.ui.open({ id: PANE, title: "Orchestra" });
+    const opened = await $.ui.open({ id: PANE, title: "Agent tree" });
 
     return {
       text: opened.isPlaced
-        ? "Orchestra view opened."
-        : `Orchestra view is waiting for room: ${opened.reason ?? "not placed"}.`,
+        ? "Agent tree view opened."
+        : `Agent tree view is waiting for room: ${opened.reason ?? "not placed"}.`,
     };
   });
 
@@ -301,7 +303,7 @@ export const register: Register = (on) => {
       }
     }
     const args = input as { title?: string; name?: string; prompt?: string; initiation?: string };
-    const node: OrchestraNode = {
+    const node: AgentTreeNode = {
       id: `session-${e.tool_use_id}`,
       parentId: e.agentId ?? MAIN,
       kind: "session",
@@ -314,7 +316,7 @@ export const register: Register = (on) => {
       task: args.prompt ? clip(args.prompt, 300) : undefined,
     };
     live.history.sideSessions.push(node);
-    let status: OrchestraStatus = "fail";
+    let status: AgentTreeStatus = "fail";
     try {
       const ran = await next(e);
       status = ran.deny !== undefined || ran.isError === true ? "fail" : "idle";
@@ -335,7 +337,7 @@ export const register: Register = (on) => {
       return beneath;
     }
     const graph = await read($, graphAtom);
-    // Nothing to orchestrate until the session starts an agent or side session.
+    // Nothing to show until the session starts an agent or side session.
     if (!graph.nodes.some((n) => n.kind !== "main")) {
       return beneath;
     }
@@ -365,7 +367,7 @@ export const register: Register = (on) => {
         <Button
           key="view"
           label="View"
-          onPress={() => void $.ui.open({ id: PANE, title: "Orchestra" })}
+          onPress={() => void $.ui.open({ id: PANE, title: "Agent tree" })}
         />
         <Button
           key="toggle"
@@ -399,7 +401,7 @@ export const register: Register = (on) => {
         surface: e.surface,
       });
       $.ui.toast(
-        copied.isCopied ? "Orchestra overview copied" : `Could not copy (${copied.reason})`,
+        copied.isCopied ? "Agent tree overview copied" : `Could not copy (${copied.reason})`,
       );
     };
     const head = headline(graph);
@@ -498,7 +500,7 @@ export const register: Register = (on) => {
             source={await svgSource($, graph, isFoldOpen, !isEnabled)}
             width={Math.round(natural.width * scale)}
             height={Math.round(natural.height * scale)}
-            alt={`Orchestra: ${header}`}
+            alt={`Agent tree: ${header}`}
             isInteractive
           />
         </Box>
@@ -509,7 +511,7 @@ export const register: Register = (on) => {
     const tree = layoutTree(graph, isFoldOpen);
 
     // Switching the main view is allowed only from the person's own press, which these closures are.
-    const openTo = (n: OrchestraNode) => () => void showConversation($, n);
+    const openTo = (n: AgentTreeNode) => () => void showConversation($, n);
 
     const tile = ({ node: n, x, y }: PlacedTile) => {
       const color = STATUS_COLOR[n.status];
@@ -742,7 +744,7 @@ function kick($: EngineInterface) {
 }
 
 /** Keeps a long session's saved history small by forgetting the oldest finished agents past AGENT_CAP. */
-function prune(h: OrchestraHistory) {
+function prune(h: AgentTreeHistory) {
   const ids = Object.keys(h.agents);
   const finished = ids
     .filter((id) => h.agents[id]?.status === "done" || h.agents[id]?.status === "fail")
@@ -767,7 +769,7 @@ function prune(h: OrchestraHistory) {
   }
 }
 
-function repeatOf(id: string): OrchestraNode["repeat"] {
+function repeatOf(id: string): AgentTreeNode["repeat"] {
   const entries = Object.entries(live.history.seen[id] ?? {});
   const top = entries.sort((a, b) => b[1] - a[1])[0];
 
@@ -784,7 +786,7 @@ async function sessionUsd($: EngineInterface): Promise<number | undefined> {
   }
 }
 
-async function setMainStatus($: EngineInterface, status: OrchestraStatus) {
+async function setMainStatus($: EngineInterface, status: AgentTreeStatus) {
   const now = await $.clock.now();
   if (live.waitingSince !== undefined && status !== "wait") {
     live.history.waitMs += now - live.waitingSince;
@@ -796,7 +798,7 @@ async function setMainStatus($: EngineInterface, status: OrchestraStatus) {
   live.mainStatus = status;
 }
 
-async function snapshot($: EngineInterface): Promise<OrchestraGraph> {
+async function snapshot($: EngineInterface): Promise<AgentTreeGraph> {
   const now = await $.clock.now();
   const agents = await $.agent.list();
   const h = live.history;
@@ -810,7 +812,7 @@ async function snapshot($: EngineInterface): Promise<OrchestraGraph> {
     costUsd: h.costs[id],
     tokens: h.tokens[id],
   });
-  const nodes: OrchestraNode[] = [
+  const nodes: AgentTreeNode[] = [
     {
       id: MAIN,
       parentId: null,
@@ -871,7 +873,7 @@ async function snapshot($: EngineInterface): Promise<OrchestraGraph> {
   };
 }
 
-async function refresh($: EngineInterface): Promise<OrchestraGraph | undefined> {
+async function refresh($: EngineInterface): Promise<AgentTreeGraph | undefined> {
   if (!live.isOn) {
     return undefined;
   }
@@ -902,13 +904,13 @@ async function refresh($: EngineInterface): Promise<OrchestraGraph | undefined> 
     await update(
       $,
       historyAtom,
-      () => JSON.parse(JSON.stringify(live.history)) as OrchestraHistory,
+      () => JSON.parse(JSON.stringify(live.history)) as AgentTreeHistory,
     );
     if (live.storeKey) {
       await $.store
         .set(live.storeKey, live.history)
         .catch((err: unknown) =>
-          $.ui.log(`orchestra: history not saved for a resume (${String(err)})`),
+          $.ui.log(`agent-tree: history not saved for a resume (${String(err)})`),
         );
     }
   }
@@ -926,7 +928,7 @@ async function historyKey($: EngineInterface): Promise<string | undefined> {
 }
 
 /** This conversation's saved history, dropping all but the newest few others so the store stays small. */
-async function restoreHistory($: EngineInterface): Promise<OrchestraHistory | undefined> {
+async function restoreHistory($: EngineInterface): Promise<AgentTreeHistory | undefined> {
   try {
     const launches = (await $.store.keys())
       .filter((k) => k.startsWith(HISTORY_PREFIX) && k !== live.storeKey)
@@ -938,7 +940,7 @@ async function restoreHistory($: EngineInterface): Promise<OrchestraHistory | un
     }
 
     return live.storeKey
-      ? ((await $.store.get(live.storeKey)) as OrchestraHistory | undefined)
+      ? ((await $.store.get(live.storeKey)) as AgentTreeHistory | undefined)
       : undefined;
   } catch {
     // A store that cannot be read starts the view empty, as a new conversation would.
@@ -952,7 +954,7 @@ async function restoreHistory($: EngineInterface): Promise<OrchestraHistory | un
  */
 async function svgSource(
   $: EngineInterface,
-  graph: OrchestraGraph,
+  graph: AgentTreeGraph,
   isFoldOpen: boolean,
   isPaused: boolean,
 ): Promise<string> {
@@ -974,7 +976,7 @@ async function svgSource(
 }
 
 /** What changes the drawing's shape (coarse) and what only changes its numbers and lines (fine). */
-function signatures(graph: OrchestraGraph): { coarse: string; fine: string } {
+function signatures(graph: AgentTreeGraph): { coarse: string; fine: string } {
   // The flag count, so a flag that turns on with time alone (a quiet agent makes no calls) still redraws.
   const coarse = graph.nodes.map((n) => [
     n.id,
@@ -994,8 +996,8 @@ function signatures(graph: OrchestraGraph): { coarse: string; fine: string } {
   };
 }
 
-/** The node `/orchestra open <query>` means: `main`, an id prefix, or a label fragment. */
-function findNode(graph: OrchestraGraph, query: string): OrchestraNode | undefined {
+/** The node `/agent-tree open <query>` means: `main`, an id prefix, or a label fragment. */
+function findNode(graph: AgentTreeGraph, query: string): AgentTreeNode | undefined {
   const q = query.trim().toLowerCase();
   if (q === "") {
     return undefined;
@@ -1025,7 +1027,7 @@ function startTicking($: EngineInterface) {
 }
 
 /** Puts an agent's conversation, or the main one, in view; a refusal is said rather than lost. */
-async function showConversation($: EngineInterface, n: OrchestraNode) {
+async function showConversation($: EngineInterface, n: AgentTreeNode) {
   const moved = await $.ui.view(n.kind === "agent" ? { agentId: n.id } : {});
   if (moved.deny) {
     $.ui.toast(`Could not show ${n.label}: ${moved.deny}`);

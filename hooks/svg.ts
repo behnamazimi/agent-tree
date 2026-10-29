@@ -1,4 +1,4 @@
-import type { OrchestraGraph, OrchestraNode, OrchestraStatus } from "../types";
+import type { AgentTreeGraph, AgentTreeNode, AgentTreeStatus } from "../types";
 import {
   age,
   clip,
@@ -32,7 +32,7 @@ const TL_LABEL = 168;
 const TL_CHAR = 6.2;
 const TL_BAR_H = 12;
 
-const HEX: Record<OrchestraStatus, string> = {
+const HEX: Record<AgentTreeStatus, string> = {
   run: "#1D9E75",
   wait: "#D68A1F",
   hold: "#378ADD",
@@ -95,7 +95,7 @@ text{font-family:ui-sans-serif,system-ui,-apple-system,sans-serif}
 
 /** The drawing's natural size in CSS pixels. */
 export function svgSize(
-  graph: OrchestraGraph,
+  graph: AgentTreeGraph,
   isFoldOpen: boolean,
 ): { width: number; height: number } {
   const tree = layoutTree(graph, isFoldOpen, DIMS);
@@ -116,7 +116,7 @@ export function svgSize(
  * the Svg's interactive frame; the frame runs no script, so nothing here clicks.
  */
 export function renderGraphSvg(
-  graph: OrchestraGraph,
+  graph: AgentTreeGraph,
   opts: { isPaused: boolean; isFoldOpen: boolean; now: number; phase?: number },
 ): string {
   const tree = layoutTree(graph, opts.isFoldOpen, DIMS);
@@ -194,7 +194,7 @@ function wire({ from, to }: TreeEdge, i: number, phase: number): string {
 function card(
   { node: n, x, y }: PlacedTile,
   i: number,
-  graph: OrchestraGraph,
+  graph: AgentTreeGraph,
   now: number,
 ): string {
   const color = HEX[n.status];
@@ -277,7 +277,7 @@ function popover(
 function foldPopover(
   { x, y }: PlacedFold,
   i: number,
-  finished: OrchestraNode[],
+  finished: AgentTreeNode[],
   width: number,
   bottom: number,
 ): string {
@@ -288,7 +288,7 @@ function foldPopover(
   const more = finished.length - FOLD_POP_ROWS;
   const tail: PopLine[] = [
     ...(more > 0 ? [{ text: `+${more} more`, cls: "h" }] : []),
-    { text: "Show them all: /orchestra all", cls: "h" },
+    { text: "Show them all: /agent-tree all", cls: "h" },
   ];
 
   return popBox(`q${i}`, [...lines, ...tail], x, y, FOLD_H, width, bottom);
@@ -354,7 +354,7 @@ function wrap(text: string, first: number, rest: number, maxLines: number): stri
 }
 
 function timeline(
-  graph: OrchestraGraph,
+  graph: AgentTreeGraph,
   rows: TimelineRow[],
   top: number,
   width: number,
@@ -412,7 +412,7 @@ function esc(text: string): string {
 
 /** The pane header's bar on the desktop: a thin rounded track split by status, stretched to its slot. */
 export function renderBarSvg(
-  counts: ReadonlyArray<readonly [OrchestraStatus, number]>,
+  counts: ReadonlyArray<readonly [AgentTreeStatus, number]>,
   width: number,
 ): string {
   // 4px bar with 6px above and 4px below: the space between the header's rows.

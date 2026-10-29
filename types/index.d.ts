@@ -1,13 +1,13 @@
 /** `wait`: needs the person; `hold`: waits on its own agents, background work or a plan's approval. */
-export type OrchestraStatus = "run" | "wait" | "hold" | "idle" | "done" | "fail";
+export type AgentTreeStatus = "run" | "wait" | "hold" | "idle" | "done" | "fail";
 
-export type OrchestraNode = {
+export type AgentTreeNode = {
   id: string;
   parentId: string | null;
   kind: "main" | "agent" | "session";
   label: string;
   type: string;
-  status: OrchestraStatus;
+  status: AgentTreeStatus;
   model?: string;
   calls: number;
   lastTool?: string;
@@ -29,8 +29,8 @@ export type OrchestraNode = {
   tokens?: number;
 };
 
-export type OrchestraGraph = {
-  nodes: OrchestraNode[];
+export type AgentTreeGraph = {
+  nodes: AgentTreeNode[];
   ctxPercent?: number;
   costUsd?: number;
   waitMs?: number;
@@ -39,15 +39,15 @@ export type OrchestraGraph = {
   now: number;
 };
 
-export type OrchestraCounter = { calls: number; lastTool?: string; lastAt?: number };
+export type AgentTreeCounter = { calls: number; lastTool?: string; lastAt?: number };
 
 /** What the session has seen so far, kept in $.state so a reload loses none of it. */
-export type OrchestraHistory = {
+export type AgentTreeHistory = {
   sessionStartedAt: number;
   mainModel?: string;
   waitMs: number;
   peak: number;
-  counters: Record<string, OrchestraCounter>;
+  counters: Record<string, AgentTreeCounter>;
   models: Record<string, string>;
   startedAt: Record<string, number>;
   endedAt: Record<string, number>;
@@ -62,20 +62,20 @@ export type OrchestraHistory = {
   tokens: Record<string, number>;
   /** The session's cost when the last request was attributed; the next one's share is the difference. */
   lastUsd: number;
-  sideSessions: OrchestraNode[];
+  sideSessions: AgentTreeNode[];
   /** Every agent seen in the agent list, so one the list drops when it ends stays on the graph. */
   agents: Record<
     string,
-    { label: string; type: string; parentId: string | null; status: OrchestraStatus }
+    { label: string; type: string; parentId: string | null; status: AgentTreeStatus }
   >;
 };
 
 declare module "claude-code" {
   interface PluginState {
-    orchestra: {
+    "agent-tree": {
       isOn: boolean;
-      graph: OrchestraGraph;
-      history: OrchestraHistory | null;
+      graph: AgentTreeGraph;
+      history: AgentTreeHistory | null;
       /** The clock the pane draws ages with, ticked only while something is live. */
       now: number;
       /** Whether folded finished agents are shown. */
